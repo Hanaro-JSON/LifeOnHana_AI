@@ -13,3 +13,6 @@ __pycache__/
 # 기타
 *.log
 .DS_Store 
+
+wsgi.pyc
+__pycache__/wsgi.cpython-*.pyc

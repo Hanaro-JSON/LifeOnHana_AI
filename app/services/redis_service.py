@@ -5,5 +5,5 @@ class RedisService:
         self.client = redis.Redis(
             host=host,
             port=port,
-            decode_responses=True
+            decode_responses=False
         ) 

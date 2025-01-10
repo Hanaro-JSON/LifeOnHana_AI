@@ -4,13 +4,31 @@ from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 import numpy as np
 from datetime import datetime
 from typing import List, Dict
+import logging  # 추가
+import math
+import json  # 상단에 import 추가
+
+# 로그 레벨 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class VectorService:
     def __init__(self, redis_client, bert_model):
         self.redis = redis_client
         self.bert = bert_model
         self.VECTOR_DIM = 768
-        self._create_index()
+        self.seen_categories = set()
+        logger.info("VectorService 초기화 시작")
+        
+        # 기존 인덱스 삭제 후 재생성
+        try:
+            self.redis.ft("article_idx").dropindex()
+            logger.info("기존 인덱스 삭제 완료")
+        except:
+            logger.info("삭제할 인덱스 없음")
+        
+        self._check_and_create_index()
+        logger.info("VectorService 초기화 완료")
         
         # A/B 테스트를 위한 설정
         self.ab_test_groups = {
@@ -52,15 +70,30 @@ class VectorService:
             print("Index already exists")
     
     def store_article(self, article_id, title, content):
-        embedding = self.bert.get_embedding(content)
-        self.redis.hset(
-            f"article:{article_id}",
-            mapping={
-                "title": title,
-                "content": content,
-                "embedding": embedding.tobytes()
-            }
-        )
+        """기사 저장"""
+        try:
+            logger.info(f"=== 기사 저장 시작 === article_id: {article_id}")
+            
+            # 임베딩 생성
+            embedding = self.bert.get_embedding(content)
+            logger.info(f"임베딩 생성 완료: shape={embedding.shape}")
+            
+            # Redis에 저장
+            result = self.redis.hset(
+                f"article:{article_id}",
+                mapping={
+                    "title": title,
+                    "content": content,
+                    "embedding": embedding.tobytes()
+                }
+            )
+            logger.info(f"Redis 저장 완료: result={result}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"기사 저장 중 에러 발생: {str(e)}", exc_info=True)
+            raise e
     
     def search_similar(self, query_text, k=5):
         query_embedding = self.bert.get_embedding(query_text)
@@ -83,18 +116,26 @@ class VectorService:
         )
         return results 
     
-    def record_user_action(self, user_id, article_id, action_type):
+    def record_user_action(self, user_id: str, article_id: str, action_type: str):
         """사용자 행동 기록 (조회, 좋아요, 공유 등)"""
-        timestamp = datetime.now().isoformat()
-        self.redis.hset(
-            f"user_action:{user_id}:{article_id}:{timestamp}",
-            mapping={
-                "user_id": user_id,
-                "article_id": article_id,
-                "action_type": action_type,
-                "timestamp": timestamp
-            }
-        )
+        try:
+            timestamp = datetime.now().isoformat()
+            key = f"user_action:{user_id}:{article_id}:{timestamp}"
+            
+            self.redis.hset(
+                key,
+                mapping={
+                    "user_id": user_id,
+                    "article_id": article_id,
+                    "action_type": action_type,
+                    "timestamp": timestamp
+                }
+            )
+            logger.info(f"사용자 행동 기록 완료: {key}")
+            
+        except Exception as e:
+            logger.error(f"사용자 행동 기록 중 에러: {str(e)}")
+            raise e
     
     def get_user_profile(self, user_id, days=30):
         actions = self._get_recent_actions(user_id, days)
@@ -200,59 +241,84 @@ class VectorService:
         
         return sorted(final_recs, key=lambda x: x['final_score'], reverse=True) 
     
-    def get_recommendations(self, user_id: str, context: dict, k: int = 10) -> List[Dict]:
-        """개선된 하이브리드 추천 시스템"""
-        
-        # 1. 세션 기반 관심사 파악
-        session_interests = self._get_session_interests(user_id)
-        
-        # 2. 컨텍스트 정보 처리
-        time_of_day = self._get_time_of_day()
-        context_weights = self.context_weights.get(time_of_day, {})
-        
-        # 3. A/B 테스트 그룹 할당
-        ab_group = self._get_ab_test_group(user_id)
-        weights = self.ab_test_groups[ab_group]
-        
-        # 4. 기본 추천 획득
-        content_recs = self.get_diverse_recommendations(user_id, k=k)
-        cf_recs = self._get_cf_recommendations(self._find_similar_users(user_id))
-        
-        # 5. 최종 점수 계산
-        final_recs = []
-        seen_articles = set()
-        
-        for content_rec in content_recs:
-            article_id = content_rec['article_id']
-            if article_id in seen_articles:
-                continue
-                
-            # 기본 점수 계산
-            base_score = self._calculate_base_score(
-                content_rec, 
-                cf_recs, 
-                weights,
-                session_interests
-            )
+    def get_recommendations(self, user_id: str, context: dict = None, k: int = 10) -> List[Dict]:
+        """사용자 맞춤 기사 추천"""
+        try:
+            logger.info(f"=== 추천 시작 === user_id: {user_id}, k: {k}")
             
-            # 컨텍스트 가중치 적용
-            category = content_rec['category']
-            context_multiplier = context_weights.get(category, 1.0)
+            # AB 테스트 그룹 결정
+            ab_group = self._get_ab_test_group(user_id)
+            logger.info(f"AB 테스트 그룹: {ab_group}")
             
-            # 최종 점수
-            final_score = base_score * context_multiplier
+            # 1. 최근 본 기사들 조회
+            recent_actions = self._get_recent_actions(user_id, hours=24)
+            logger.info(f"최근 행동 수: {len(recent_actions)}")
+            logger.info(f"최근 행동: {recent_actions}")
             
-            final_recs.append({
-                **content_rec,
-                'final_score': final_score,
-                'ab_group': ab_group
-            })
-            seen_articles.add(article_id)
-        
-        # 6. 결과 로깅
-        self._log_recommendation_results(user_id, final_recs, ab_group)
-        
-        return sorted(final_recs, key=lambda x: x['final_score'], reverse=True)[:k]
+            # 2. 컨텐츠 기반 추천
+            content_scores = {}
+            
+            # 최근 행동이 없으면 전체 기사에서 최신순으로 추천
+            if not recent_actions:
+                logger.info("최근 행동 없음 - 전체 기사에서 추천")
+                for key in self.redis.scan_iter("article:*"):
+                    try:
+                        article_id = key.decode('utf-8').split(':')[1]
+                        article_data = self.redis.hgetall(key)
+                        
+                        if article_data:
+                            content_scores[article_id] = 1.0  # 기본 점수
+                    except Exception as e:
+                        logger.error(f"기사 처리 중 에러: {str(e)}")
+                        continue
+            else:
+                # 최근 본 기사 기반 추천
+                logger.info("최근 행동 기반 추천 시작")
+                for action in recent_actions:
+                    article_id = action.get('article_id')
+                    if article_id:
+                        try:
+                            article_vector = self._get_article_vector(article_id)
+                            results = self.search_similar_by_vector(article_vector, k=k)
+                            logger.info(f"유사 기사 검색 결과: {len(results.docs)}개")
+                            
+                            for doc in results.docs:
+                                doc_id = doc.id.split(':')[1]
+                                score = 1 - float(doc.score)
+                                content_scores[doc_id] = max(content_scores.get(doc_id, 0), score)
+                        except Exception as e:
+                            logger.error(f"기사 {article_id} 처리 중 에러: {str(e)}")
+                            continue
+            
+            # 3. 최종 추천 결과 생성
+            recommendations = []
+            for article_id, score in content_scores.items():
+                try:
+                    article_data = self.redis.hgetall(f"article:{article_id}")
+                    if article_data:
+                        title = article_data.get(b'title', b'').decode('utf-8')
+                        content = article_data.get(b'content', b'').decode('utf-8')
+                        
+                        recommendations.append({
+                            'article_id': article_id,
+                            'title': title,
+                            'content': content,
+                            'final_score': score
+                        })
+                except Exception as e:
+                    logger.error(f"기사 데이터 처리 중 에러: {str(e)}")
+                    continue
+            
+            # 점수로 정렬하고 상위 k개 반환
+            recommendations.sort(key=lambda x: x['final_score'], reverse=True)
+            logger.info(f"최종 추천 결과: {len(recommendations)}개")
+            
+            logger.info(f"=== 추천 완료 === 결과 수: {len(recommendations[:k])}")
+            return recommendations[:k]
+            
+        except Exception as e:
+            logger.error(f"추천 생성 중 에러 발생: {str(e)}", exc_info=True)
+            raise e 
 
     def _get_session_interests(self, user_id: str) -> Dict[str, float]:
         """최근 세션의 관심사 분석"""
@@ -294,21 +360,20 @@ class VectorService:
         
         return content_score + cf_score + time_score + diversity_score + session_score
 
-    def _log_recommendation_results(self, user_id: str, recommendations: List[Dict], 
-                                  ab_group: str):
+    def _log_recommendation_results(self, user_id: str, recommendations: List[Dict], ab_group: str):
         """추천 결과 로깅"""
         timestamp = datetime.now().isoformat()
         log_data = {
             'user_id': user_id,
             'timestamp': timestamp,
             'ab_group': ab_group,
-            'recommendations': [
+            'recommendations': json.dumps([
                 {
                     'article_id': rec['article_id'],
-                    'score': rec['final_score'],
+                    'score': float(rec['final_score']),
                     'category': rec['category']
                 } for rec in recommendations
-            ]
+            ])
         }
         
         self.redis.hset(
@@ -317,11 +382,25 @@ class VectorService:
         )
 
     def _get_ab_test_group(self, user_id: str) -> str:
-        """A/B 테스트 그룹 할당"""
-        if not self.redis.exists(f"ab_test_group:{user_id}"):
-            group = 'A' if hash(user_id) % 2 == 0 else 'B'
-            self.redis.set(f"ab_test_group:{user_id}", group)
-        return self.redis.get(f"ab_test_group:{user_id}")
+        """사용자의 AB 테스트 그룹 결정"""
+        try:
+            # 기존 그룹 조회
+            group = self.redis.get(f"ab_test:{user_id}")
+            
+            # bytes를 문자열로 디코딩
+            if isinstance(group, bytes):
+                group = group.decode('utf-8')
+            
+            # 그룹이 없으면 새로 할당
+            if not group:
+                group = 'A' if hash(user_id) % 2 == 0 else 'B'
+                self.redis.set(f"ab_test:{user_id}", group)
+            
+            return group
+            
+        except Exception as e:
+            logger.error(f"AB 테스트 그룹 결정 중 에러: {str(e)}")
+            return 'A'  # 에러 시 기본 그룹 반환
 
     def _get_time_of_day(self) -> str:
         """시간대 확인"""
@@ -374,3 +453,183 @@ class VectorService:
             cf_scores = {k: v/max_score for k, v in cf_scores.items()}
         
         return [{'article_id': k, 'score': v} for k, v in cf_scores.items()] 
+
+    def _get_recent_actions(self, user_id: str, days: int = 30, hours: int = None) -> List[Dict]:
+        """사용자의 최근 행동 기록 조회"""
+        try:
+            actions = []
+            pattern = f"user_action:{user_id}:*"
+            
+            # Redis에서 사용자 행동 기록 조회
+            for key in self.redis.scan_iter(pattern):
+                action = self.redis.hgetall(key)
+                if action:  # 데이터가 있으면
+                    # bytes를 문자열로 디코딩
+                    decoded_action = {}
+                    for field, value in action.items():
+                        if isinstance(field, bytes):
+                            field = field.decode('utf-8')
+                        if isinstance(value, bytes):
+                            value = value.decode('utf-8')
+                        decoded_action[field] = value
+                    
+                    actions.append(decoded_action)
+            
+            return actions
+            
+        except Exception as e:
+            logger.error(f"최근 행동 조회 중 에러: {str(e)}")
+            return []
+
+    def _get_article_category(self, title: str, content: str = None) -> str:
+        """기사 카테고리 분류"""
+        # 간단한 키워드 기반 분류
+        keywords = {
+            'investment': ['주식', '투자', '펀드', '자산'],
+            'banking': ['예금', '적금', '은행', '금리'],
+            'loan': ['대출', '담보', '신용', '이자'],
+            'insurance': ['보험', '보장', '청구', '가입'],
+            'real_estate': ['부동산', '아파트', '전세', '월세'],
+            'tech': ['기술', 'IT', '인공지능', '블록체인'],
+            'market': ['시장', '경제', '트렌드', '전망']
+        }
+        
+        text = f"{title} {content if content else ''}"
+        
+        # 각 카테고리별 키워드 매칭 수 계산
+        category_scores = {}
+        for category, words in keywords.items():
+            score = sum(1 for word in words if word in text)
+            category_scores[category] = score
+        
+        # 가장 높은 점수의 카테고리 반환
+        if any(category_scores.values()):
+            return max(category_scores.items(), key=lambda x: x[1])[0]
+        
+        return 'general'  # 기본 카테고리 
+
+    def search_similar_by_vector(self, query_vector: np.ndarray, k: int = 5):
+        """벡터 기반 유사 기사 검색"""
+        try:
+            logger.info(f"벡터 검색 시작 - 벡터 shape: {query_vector.shape}")
+            logger.info(f"검색 벡터 타입: {type(query_vector)}, dtype: {query_vector.dtype}")
+            
+            # numpy 배열을 bytes로 변환
+            vector_bytes = query_vector.tobytes()
+            
+            query = (
+                Query(
+                    f"(*)=>[KNN {k} @embedding $vec_param AS score]"
+                )
+                .sort_by("score")
+                .return_fields("title", "content", "score")
+                .dialect(2)
+                .paging(0, k)
+            )
+            
+            results = self.redis.ft("article_idx").search(
+                query,
+                {
+                    "vec_param": vector_bytes
+                }
+            )
+            
+            logger.info(f"검색 결과: {len(results.docs)}개")
+            for doc in results.docs:
+                logger.info(f"문서 ID: {doc.id}, 점수: {doc.score}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"벡터 검색 중 에러 발생: {str(e)}", exc_info=True)
+            raise e 
+
+    def _get_article_vector(self, article_id: str) -> np.ndarray:
+        """기사의 임베딩 벡터 가져오기"""
+        try:
+            logger.info(f"기사 벡터 조회 시작 - article_id: {article_id}")
+            
+            # Redis에서 기사 벡터 조회
+            article_key = f"article:{article_id}"
+            embedding_bytes = self.redis.hget(article_key, "embedding")
+            
+            if embedding_bytes is None:
+                logger.error(f"기사를 찾을 수 없음: {article_id}")
+                raise ValueError(f"Article {article_id} not found")
+            
+            # 바이트를 numpy 배열로 변환
+            vector = np.frombuffer(embedding_bytes, dtype=np.float32)
+            logger.info(f"벡터 조회 완료 - shape: {vector.shape}")
+            
+            return vector
+            
+        except Exception as e:
+            logger.error(f"기사 벡터 조회 중 에러: {str(e)}", exc_info=True)
+            raise e
+
+    def _calculate_time_weight(self, timestamp: str) -> float:
+        """시간 기반 가중치 계산"""
+        try:
+            if not timestamp:
+                return 0.5
+            
+            # timestamp가 bytes 타입인 경우 디코딩
+            if isinstance(timestamp, bytes):
+                timestamp = timestamp.decode('utf-8')
+            
+            time_diff = datetime.now() - datetime.fromisoformat(timestamp)
+            hours_old = time_diff.total_seconds() / 3600
+            
+            # 24시간 이내: 1.0 ~ 0.5
+            # 24시간 이후: 0.5 ~ 0.1
+            if hours_old <= 24:
+                return 1.0 - (hours_old / 48)  # 24시간동안 선형 감소
+            else:
+                return max(0.1, 0.5 * math.exp(-0.1 * (hours_old - 24)))
+            
+        except Exception as e:
+            logger.error(f"시간 가중치 계산 중 에러: {str(e)}")
+            return 0.5  # 에러 발생 시 기본값 반환
+
+    def _check_and_create_index(self):
+        """인덱스 확인 및 생성"""
+        try:
+            # 기존 인덱스 정보 확인
+            try:
+                info = self.redis.ft("article_idx").info()
+                logger.info(f"기존 인덱스 정보: {info}")
+            except:
+                logger.info("기존 인덱스 없음")
+                info = None
+            
+            # 인덱스가 없으면 생성
+            if not info:
+                logger.info("새 인덱스 생성 시작")
+                try:
+                    self.redis.ft("article_idx").create_index([
+                        TextField("title"),
+                        TextField("content"),
+                        VectorField("embedding",
+                            "FLAT",
+                            {
+                                "TYPE": "FLOAT32",
+                                "DIM": self.VECTOR_DIM,
+                                "DISTANCE_METRIC": "COSINE"
+                            }
+                        )
+                    ], definition=IndexDefinition(prefix=["article:"], index_type=IndexType.HASH))
+                    logger.info("새 인덱스 생성 완료")
+                except Exception as e:
+                    logger.error(f"인덱스 생성 중 에러: {str(e)}")
+                    raise e
+                
+            # 인덱스에 포함된 문서 수 확인
+            try:
+                doc_count = self.redis.ft("article_idx").info()['num_docs']
+                logger.info(f"인덱스 문서 수: {doc_count}")
+            except:
+                logger.error("문서 수 확인 실패")
+            
+        except Exception as e:
+            logger.error(f"인덱스 확인 중 에러: {str(e)}")
+            raise e 
