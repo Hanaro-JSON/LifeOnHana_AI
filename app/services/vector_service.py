@@ -1,12 +1,19 @@
+from redis.asyncio import Redis
 from redis.commands.search.field import TextField, VectorField
 from redis.commands.search.query import Query
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 import numpy as np
-from datetime import datetime
-from typing import List, Dict
+from datetime import datetime, timedelta
+from typing import List, Dict, TypeVar
 import logging  # 추가
 import math
 import json  # 상단에 import 추가
+from functools import lru_cache
+from config import settings  # 설정 파일 import
+import numpy.typing as npt
+
+# numpy array 타입 정의
+ArrayType = TypeVar("ArrayType", bound=npt.NDArray[np.float32])
 
 # 로그 레벨 설정
 logging.basicConfig(level=logging.INFO)
@@ -15,33 +22,21 @@ logger = logging.getLogger(__name__)
 class VectorService:
     def __init__(self, redis_client, bert_model):
         self.redis = redis_client
+        self.async_redis = Redis(
+            host=settings.REDIS_CONFIG['host'],
+            port=settings.REDIS_CONFIG['port'],
+            db=settings.REDIS_CONFIG['db']
+        )
         self.bert = bert_model
-        self.VECTOR_DIM = 768
-        self.seen_categories = set()
-        logger.info("VectorService 초기화 시작")
+        # 설정 파일로 이동
+        self.VECTOR_DIM = settings.VECTOR_DIM
+        self.ab_test_groups = settings.AB_TEST_GROUPS
+        self.context_weights = settings.CONTEXT_WEIGHTS
         
-        # 기존 인덱스 삭제 후 재생성
-        try:
-            self.redis.ft("article_idx").dropindex()
-            logger.info("기존 인덱스 삭제 완료")
-        except:
-            logger.info("삭제할 인덱스 없음")
+        # Redis Sorted Set 키
+        self.user_actions_key = "user_actions:{}"
         
-        self._check_and_create_index()
         logger.info("VectorService 초기화 완료")
-        
-        # A/B 테스트를 위한 설정
-        self.ab_test_groups = {
-            'A': {'content': 0.4, 'cf': 0.3, 'time': 0.2, 'diversity': 0.1},
-            'B': {'content': 0.3, 'cf': 0.4, 'time': 0.2, 'diversity': 0.1}
-        }
-        
-        # 컨텍스트 가중치
-        self.context_weights = {
-            'morning': {'investment': 1.2, 'market_news': 1.1},
-            'afternoon': {'loan': 1.2, 'credit': 1.1},
-            'evening': {'savings': 1.2, 'insurance': 1.1}
-        }
 
     def _create_index(self):
         try:
@@ -117,21 +112,19 @@ class VectorService:
         return results 
     
     def record_user_action(self, user_id: str, article_id: str, action_type: str):
-        """사용자 행동 기록 (조회, 좋아요, 공유 등)"""
+        """사용자 행동을 Sorted Set으로 저장"""
         try:
-            timestamp = datetime.now().isoformat()
-            key = f"user_action:{user_id}:{article_id}:{timestamp}"
+            timestamp = datetime.now().timestamp()
+            key = self.user_actions_key.format(user_id)
             
-            self.redis.hset(
-                key,
-                mapping={
-                    "user_id": user_id,
-                    "article_id": article_id,
-                    "action_type": action_type,
-                    "timestamp": timestamp
-                }
-            )
-            logger.info(f"사용자 행동 기록 완료: {key}")
+            # Sorted Set에 저장 (score는 timestamp)
+            self.redis.zadd(key, {
+                f"{article_id}:{action_type}": timestamp
+            })
+            
+            # 30일 이전 데이터 자동 삭제
+            old_timestamp = (datetime.now() - timedelta(days=30)).timestamp()
+            self.redis.zremrangebyscore(key, '-inf', old_timestamp)
             
         except Exception as e:
             logger.error(f"사용자 행동 기록 중 에러: {str(e)}")
@@ -360,26 +353,31 @@ class VectorService:
         
         return content_score + cf_score + time_score + diversity_score + session_score
 
-    def _log_recommendation_results(self, user_id: str, recommendations: List[Dict], ab_group: str):
-        """추천 결과 로깅"""
-        timestamp = datetime.now().isoformat()
-        log_data = {
-            'user_id': user_id,
-            'timestamp': timestamp,
-            'ab_group': ab_group,
-            'recommendations': json.dumps([
-                {
-                    'article_id': rec['article_id'],
-                    'score': float(rec['final_score']),
-                    'category': rec['category']
-                } for rec in recommendations
-            ])
-        }
-        
-        self.redis.hset(
-            f"recommendation_log:{user_id}:{timestamp}",
-            mapping=log_data
-        )
+    async def _log_recommendation_results(self, user_id: str, recommendations: List[Dict], ab_group: str):
+        """비동기 로깅"""
+        try:
+            timestamp = datetime.now().isoformat()
+            log_data = {
+                'user_id': user_id,
+                'timestamp': timestamp,
+                'ab_group': ab_group,
+                'recommendations': json.dumps([
+                    {
+                        'article_id': rec['article_id'],
+                        'score': float(rec['final_score']),
+                        'category': rec['category']
+                    } for rec in recommendations
+                ])
+            }
+            
+            # 비동기로 로그 저장
+            await self.async_redis.hset(
+                f"recommendation_log:{user_id}:{timestamp}",
+                mapping=log_data
+            )
+            
+        except Exception as e:
+            logger.error(f"로깅 중 에러: {str(e)}")
 
     def _get_ab_test_group(self, user_id: str) -> str:
         """사용자의 AB 테스트 그룹 결정"""
@@ -455,25 +453,33 @@ class VectorService:
         return [{'article_id': k, 'score': v} for k, v in cf_scores.items()] 
 
     def _get_recent_actions(self, user_id: str, days: int = 30, hours: int = None) -> List[Dict]:
-        """사용자의 최근 행동 기록 조회"""
+        """Sorted Set을 사용한 최근 행동 조회"""
         try:
-            actions = []
-            pattern = f"user_action:{user_id}:*"
+            key = self.user_actions_key.format(user_id)
             
-            # Redis에서 사용자 행동 기록 조회
-            for key in self.redis.scan_iter(pattern):
-                action = self.redis.hgetall(key)
-                if action:  # 데이터가 있으면
-                    # bytes를 문자열로 디코딩
-                    decoded_action = {}
-                    for field, value in action.items():
-                        if isinstance(field, bytes):
-                            field = field.decode('utf-8')
-                        if isinstance(value, bytes):
-                            value = value.decode('utf-8')
-                        decoded_action[field] = value
-                    
-                    actions.append(decoded_action)
+            # 시간 범위 설정
+            if hours:
+                min_timestamp = (datetime.now() - timedelta(hours=hours)).timestamp()
+            else:
+                min_timestamp = (datetime.now() - timedelta(days=days)).timestamp()
+                
+            # Sorted Set에서 시간 범위로 조회
+            action_data = self.redis.zrangebyscore(
+                key, 
+                min_timestamp, 
+                '+inf', 
+                withscores=True
+            )
+            
+            actions = []
+            for action_str, timestamp in action_data:
+                article_id, action_type = action_str.decode().split(':')
+                actions.append({
+                    'user_id': user_id,
+                    'article_id': article_id,
+                    'action_type': action_type,
+                    'timestamp': datetime.fromtimestamp(timestamp).isoformat()
+                })
             
             return actions
             
@@ -544,27 +550,20 @@ class VectorService:
             logger.error(f"벡터 검색 중 에러 발생: {str(e)}", exc_info=True)
             raise e 
 
-    def _get_article_vector(self, article_id: str) -> np.ndarray:
-        """기사의 임베딩 벡터 가져오기"""
+    @lru_cache(maxsize=1000)
+    def _get_article_vector(self, article_id: str) -> npt.NDArray[np.float32]:
+        """기사 벡터 조회 (캐싱 적용)"""
         try:
-            logger.info(f"기사 벡터 조회 시작 - article_id: {article_id}")
-            
-            # Redis에서 기사 벡터 조회
             article_key = f"article:{article_id}"
             embedding_bytes = self.redis.hget(article_key, "embedding")
             
             if embedding_bytes is None:
-                logger.error(f"기사를 찾을 수 없음: {article_id}")
                 raise ValueError(f"Article {article_id} not found")
             
-            # 바이트를 numpy 배열로 변환
-            vector = np.frombuffer(embedding_bytes, dtype=np.float32)
-            logger.info(f"벡터 조회 완료 - shape: {vector.shape}")
-            
-            return vector
+            return np.frombuffer(embedding_bytes, dtype=np.float32)
             
         except Exception as e:
-            logger.error(f"기사 벡터 조회 중 에러: {str(e)}", exc_info=True)
+            logger.error(f"기사 벡터 조회 중 에러: {str(e)}")
             raise e
 
     def _calculate_time_weight(self, timestamp: str) -> float:
