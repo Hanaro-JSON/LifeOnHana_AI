@@ -11,4 +11,4 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["python", "wsgi.py"] 
+CMD ["python", "app.py"] 
