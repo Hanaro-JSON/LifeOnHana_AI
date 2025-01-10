@@ -1,0 +1,6 @@
+flask==3.0.3
+redis==5.0.1
+transformers>=3.5.1,<5.0.0
+torch>=1.4.1
+numpy
+anthropic
