@@ -6,3 +6,4 @@ numpy
 anthropic
 sqlalchemy
 pymysql
+requests>=2.31.0
