@@ -5,16 +5,29 @@ services:
       - "5000:5000"
     volumes:
       - .:/app
-      - ./Bert:/app/Bert
+      - model_cache:/root/.cache/huggingface  # 모델 캐시 별도 볼륨
     environment:
       - FLASK_APP=app.py
       - FLASK_ENV=development
       - FLASK_DEBUG=1
       - REDIS_HOST=redis
       - MODEL_PATH=/app/Bert
-    command: flask run --host=0.0.0.0 --port=5000 --debug
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"   # 로그 파일 최대 크기
+        max-file: "3"     # 보관할 로그 파일 수
+    deploy:
+      resources:
+        limits:
+          memory: 2GB    # 메모리 제한
+          cpus: '2'      # CPU 제한
+        reservations:
+          memory: 1GB    # 최소 보장 메모리
+    command: python app.py  # flask run 대신 직접 실행
     depends_on:
       - redis
+    
 
   redis:
     image: redis/redis-stack:latest
@@ -23,6 +36,12 @@ services:
       - "8001:8001"
     volumes:
       - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 1GB
+          cpus: '1'
 
 volumes:
-  redis_data: 
+  redis_data:
+  model_cache:   
