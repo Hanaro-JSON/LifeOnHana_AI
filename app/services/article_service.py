@@ -47,7 +47,7 @@ class ArticleService:
 
             modified = False
             total_words = 0
-            processed_words = set()  # 이미 처리된 단어들을 추적
+            processed_words = set()
             
             if 'content' in article:
                 new_content = []
@@ -55,19 +55,32 @@ class ArticleService:
                     if isinstance(block, dict) and block.get('type') == 'text' and total_words < 5:
                         content = block.get('content', '')
                         if content and len(content) > 10:
-                            difficult_words = self.bert_model.get_difficult_words(content, 0.7)
-                            difficult_words = self._filter_most_difficult(difficult_words)
+                            # 새로운 난이도 기준 적용 (BERT + Korpora)
+                            difficult_words = self.bert_model.get_difficult_words(
+                                content, 
+                                threshold=0.65  # 빈도 정보가 추가되어 threshold 조정
+                            )
                             
-                            # 중복 단어 제거
-                            difficult_words = [
-                                word for word in difficult_words 
-                                if word['word'] not in processed_words
-                            ]
+                            # 난이도 점수로 정렬하고 중복 제거
+                            difficult_words = sorted(
+                                [word for word in difficult_words if word['word'] not in processed_words],
+                                key=lambda x: x['difficulty_score'],
+                                reverse=True
+                            )
                             
                             remaining_words = 5 - total_words
                             difficult_words = difficult_words[:remaining_words]
                             
                             if difficult_words:
+                                # 디버깅을 위한 난이도 정보 로깅
+                                for word in difficult_words:
+                                    logger.debug(
+                                        f"선택된 단어: {word['word']}, "
+                                        f"난이도 점수: {word['difficulty_score']:.3f}, "
+                                        f"빈도: {word['frequency']:.6f}, "
+                                        f"BERT 점수: {word['bert_score']:.3f}"
+                                    )
+                                
                                 descriptions = self.processor._get_batch_descriptions(difficult_words)
                                 current_pos = 0
                                 
@@ -84,15 +97,19 @@ class ArticleService:
                                             new_content.append({
                                                 "type": "word",
                                                 "content": word['word'],
-                                                "description": descriptions[word['word']]
+                                                "description": descriptions[word['word']],
+                                                "difficulty_info": {  # 난이도 정보 추가
+                                                    "score": round(word['difficulty_score'], 3),
+                                                    "frequency": round(word['frequency'], 6),
+                                                    "bert_score": round(word['bert_score'], 3)
+                                                }
                                             })
                                             
                                             current_pos = word_pos + len(word['word'])
-                                            processed_words.add(word['word'])  # 처리된 단어 추가
+                                            processed_words.add(word['word'])
                                             total_words += 1
                                             modified = True
                                 
-                                # 남은 텍스트 추가
                                 if current_pos < len(content):
                                     new_content.append({
                                         "type": "text",
@@ -104,13 +121,6 @@ class ArticleService:
                             new_content.append(block)
                     else:
                         new_content.append(block)
-                    
-                    if total_words >= 5:  # 최대 단어 수 도달하면 중단
-                        break
-
-                # 나머지 블록들 추가
-                if total_words >= 5:
-                    new_content.extend(article['content'][len(new_content):])
                 
                 article['content'] = new_content
 

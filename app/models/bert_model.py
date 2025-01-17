@@ -12,16 +12,16 @@ logger = logging.getLogger(__name__)
 class BertEmbedding:
     def __init__(self, model_path):
         try:
-            # AlbertForMaskedLM 대신 BertForSequenceClassification 사용
-            self.tokenizer = BertTokenizer.from_pretrained('klue/bert-base')
+            # KB-ALBERT 모델 사용
+            self.tokenizer = BertTokenizer.from_pretrained(model_path)
             self.model = BertForSequenceClassification.from_pretrained(
                 'klue/bert-base',
                 num_labels=2  # 어려움/쉬움 두 가지 클래스
             )
             self.model.eval()
-            logger.info("BERT 모델 초기화 완료")
+            logger.info("KB-ALBERT 모델 초기화 완료")
             
-            # Korpora 데이터 로드 (예: 모던 코퍼스)
+            # Korpora 데이터 로드
             self.corpus = Korpora.load('korean_modern')
             self.word_frequencies = self._calculate_word_frequencies()
         except Exception as e:
@@ -98,9 +98,40 @@ class BertEmbedding:
             return []
 
     def _calculate_bert_complexity(self, word: str) -> float:
-        """BERT 모델을 사용한 단어 복잡도 계산"""
-        # 기존 BERT 기반 복잡도 계산 로직
-        return complexity_score
+        """KB-ALBERT 모델을 사용한 단어 복잡도 계산"""
+        try:
+            # 단어를 토크나이저로 인코딩
+            inputs = self.tokenizer(
+                word,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512
+            )
+            
+            # Masked LM 예측 수행
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                predictions = outputs.logits
+                
+                # 입력 토큰의 perplexity 계산
+                token_ids = inputs['input_ids'][0]
+                mask = (token_ids != self.tokenizer.pad_token_id)
+                relevant_logits = predictions[0, mask]
+                
+                # 각 위치에서의 실제 토큰에 대한 확률 계산
+                probs = torch.nn.functional.softmax(relevant_logits, dim=-1)
+                token_probs = probs[range(len(token_ids[mask])), token_ids[mask]]
+                
+                # perplexity 기반 복잡도 점수 계산 (높을수록 어려운 단어)
+                avg_neg_log_prob = -torch.mean(torch.log(token_probs)).item()
+                complexity_score = min(1.0, avg_neg_log_prob / 10.0)  # 0~1 범위로 정규화
+                
+                return complexity_score
+                
+        except Exception as e:
+            logger.error(f"단어 복잡도 계산 중 오류 발생: {str(e)}")
+            return 0.5  # 오류 발생 시 중간값 반환
 
     def _calculate_word_frequencies(self):
         """말뭉치에서 단어 빈도 계산"""
