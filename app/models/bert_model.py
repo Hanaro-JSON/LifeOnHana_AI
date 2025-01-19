@@ -1,150 +1,159 @@
-from transformers import BertTokenizer, BertForSequenceClassification
-import torch
-import numpy as np
 import re
-from sklearn.feature_extraction.text import TfidfVectorizer
-import logging
+import torch
 from typing import List, Dict
-from korpora import Korpora, KoreanCorpus
+from transformers import BertModel, BertTokenizer
+from logging import getLogger
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+import os
+import json
+from Korpora import Korpora
 
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 
 class BertEmbedding:
-    def __init__(self, model_path):
+    def __init__(self, model_path: str = './Bert'):
+        self.model = BertModel.from_pretrained('klue/bert-base')
+        self.tokenizer = BertTokenizer.from_pretrained('klue/bert-base')
+        self.word_frequencies = {}  # 단어 빈도 저장
+        self._load_korpora()
+        logger.info("모델 및 Korpora 초기화 완료")
+
+    def _load_korpora(self):
         try:
-            # KB-ALBERT 모델 사용
-            self.tokenizer = BertTokenizer.from_pretrained(model_path)
-            self.model = BertForSequenceClassification.from_pretrained(
-                'klue/bert-base',
-                num_labels=2  # 어려움/쉬움 두 가지 클래스
-            )
-            self.model.eval()
-            logger.info("KB-ALBERT 모델 초기화 완료")
+            corpus_file = "/root/Korpora/namuwikitext/namuwikitext_20200302.dev"
+            logger.info(f"코퍼스 파일 로드 시작: {corpus_file}")
             
-            # Korpora 데이터 로드
-            self.corpus = Korpora.load('korean_modern')
-            self.word_frequencies = self._calculate_word_frequencies()
-        except Exception as e:
-            logger.error(f"모델 초기화 중 오류: {str(e)}")
-            raise e
+            total_words = 0
+            with open(corpus_file, 'r', encoding='utf-8') as f:
+                for i, line in enumerate(f):
+                    words = re.findall(r'[가-힣]+', line)
+                    for word in words:
+                        if len(word) >= 2:  # 2글자 이상만 저장
+                            self.word_frequencies[word] = self.word_frequencies.get(word, 0) + 1
+                            total_words += 1
+                    
+                    if i % 1000 == 0:
+                        logger.info(f"처리 중: {i}번째 줄, 현재 {len(self.word_frequencies)}개 단어")
 
-    def get_embedding(self, text):
-        """텍스트 임베딩 생성 (기존 기능 유지)"""
+            logger.info(f"Korpora 처리 완료: 총 {len(self.word_frequencies)}개 단어, {total_words}개 토큰")
+        except Exception as e:
+            logger.error(f"Korpora 로드 중 오류: {str(e)}")
+            self.word_frequencies = {}
+
+    def get_difficult_words(self, text: str) -> List[Dict[str, str]]:
         try:
-            inputs = self.tokenizer(
-                text,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=512
+            tokens = self.tokenizer.tokenize(text)
+            logger.info(f"텍스트 토큰화 완료 (토큰 수: {len(tokens)})")
+            
+            MAX_LENGTH = 450
+            MIN_THRESHOLD = 0.2  # 최소 임계값 설정
+            token_chunks = [tokens[i:i + MAX_LENGTH] for i in range(0, len(tokens), MAX_LENGTH)]
+            
+            all_difficult_words = []
+            
+            for chunk_tokens in token_chunks:
+                chunk_text = self.tokenizer.convert_tokens_to_string(chunk_tokens)
+                
+                inputs = self.tokenizer(
+                    chunk_text,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=512
+                )
+                
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    hidden_states = outputs.last_hidden_state.squeeze(0)
+                    
+                    # BERT 기반 복잡도 계산
+                    token_norms = torch.norm(hidden_states, dim=1)
+                    token_scores = (token_norms - token_norms.min()) / (token_norms.max() - token_norms.min())
+                    
+                    for token, score in zip(chunk_tokens, token_scores):
+                        if (len(token) >= 2 and 
+                            not token.startswith('##') and
+                            re.search(r'[가-힣]{2,}', token)):
+                            
+                            # 원본 단어 복원 (##제거)
+                            word = token.replace('##', '')
+                            
+                            # Korpora 빈도 정보 활용
+                            freq = self.word_frequencies.get(word, 0)
+                            freq_score = 1.0 / (1.0 + freq)  # 빈도가 낮을수록 높은 점수
+                            
+                            # 최종 점수 계산 (BERT 점수 70%, 빈도 점수 30%)
+                            final_score = 0.7 * float(score) + 0.3 * freq_score
+                            
+                            if final_score > MIN_THRESHOLD:  # 최소 임계값 체크
+                                all_difficult_words.append({
+                                    'word': word,
+                                    'difficulty': final_score
+                                })
+            
+            # 중복 제거 및 정렬
+            unique_words = {}
+            for item in all_difficult_words:
+                word = item['word']
+                if word not in unique_words or item['difficulty'] > unique_words[word]['difficulty']:
+                    unique_words[word] = item
+            
+            sorted_words = sorted(
+                unique_words.values(),
+                key=lambda x: x['difficulty'],
+                reverse=True
             )
             
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                embedding = outputs.logits[0].numpy()
-                return embedding.astype(np.float32)
-                
+            # 최소 3개의 단어 선택 (단, 최소 임계값 이상인 경우만)
+            if len(sorted_words) < 3:
+                logger.info(f"임계값({MIN_THRESHOLD}) 이상의 단어가 3개 미만입니다: {len(sorted_words)}개")
+            
+            logger.info(f"어려운 단어 추출 완료 (단어 수: {len(sorted_words)})")
+            if sorted_words:
+                logger.info(f"상위 단어 샘플: {[w['word'] for w in sorted_words[:5]]}")
+            
+            return sorted_words[:min(3, len(sorted_words))] 
+
         except Exception as e:
-            logger.error(f"임베딩 생성 중 에러: {str(e)}", exc_info=True)
-            raise e
-
-    def preprocess_text(self, text):
-        """텍스트 전처리"""
-        # 특수문자 제거 (한글, 영문, 숫자 유지)
-        text = re.sub(r'[^A-Za-z0-9가-힣\s]', '', text)
-        return text
-
-    def get_difficult_words(self, text: str, threshold: float = 0.7) -> List[Dict]:
-        """어려운 단어 추출 - BERT 임베딩과 빈도 정보 결합"""
-        words = self._tokenize_to_words(text)
-        difficult_words = []
-        
-        for word in words:
-            if len(word) < 2:  # 한 글자 단어는 제외
-                continue
-                
-            # BERT 기반 복잡도 점수 (기존 로직)
-            bert_score = self._calculate_bert_complexity(word)
-            
-            # 빈도 기반 점수
-            frequency = self.word_frequencies.get(word, 0)
-            frequency_score = 1.0 - min(frequency * 1000, 1.0)  # 빈도가 낮을수록 높은 점수
-            
-            # 최종 난이도 점수 계산 (BERT와 빈도 결합)
-            difficulty_score = (bert_score * 0.6) + (frequency_score * 0.4)
-            
-            if difficulty_score > threshold:
-                difficult_words.append({
-                    'word': word,
-                    'difficulty_score': difficulty_score,
-                    'frequency': frequency,
-                    'bert_score': bert_score
-                })
-        
-        return difficult_words
+            logger.error(f"어려운 단어 추출 중 오류: {str(e)}")
+            return []
 
     def _tokenize_to_words(self, text: str) -> List[str]:
+        """BERT 토크나이저로 단어 추출"""
         try:
-            # mecab으로 형태소 분석
+            tokens = self.tokenizer.tokenize(text)
             words = []
-            for token in self.tokenizer.tokenize(text):
-                # 특수 토큰 제외
-                if token.startswith('##') or token in ['[CLS]', '[SEP]', '[PAD]', '[MASK]']:
-                    continue
-                words.append(token)
-            return list(set(words))  # 중복 제거
+            for token in tokens:
+                if not token.startswith('##') and token not in ['[CLS]', '[SEP]', '[PAD]', '[MASK]']:
+                    words.append(token)
+            return list(set(words))
         except Exception as e:
             logger.error(f"토큰화 중 오류: {str(e)}")
             return []
 
     def _calculate_bert_complexity(self, word: str) -> float:
-        """KB-ALBERT 모델을 사용한 단어 복잡도 계산"""
+        """BERT 모델 기반 단어 복잡도 계산"""
         try:
-            # 단어를 토크나이저로 인코딩
             inputs = self.tokenizer(
                 word,
                 return_tensors="pt",
                 padding=True,
-                truncation=True,
-                max_length=512
+                truncation=True
             )
             
-            # Masked LM 예측 수행
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                predictions = outputs.logits
+                logits = outputs.logits
                 
-                # 입력 토큰의 perplexity 계산
-                token_ids = inputs['input_ids'][0]
-                mask = (token_ids != self.tokenizer.pad_token_id)
-                relevant_logits = predictions[0, mask]
-                
-                # 각 위치에서의 실제 토큰에 대한 확률 계산
-                probs = torch.nn.functional.softmax(relevant_logits, dim=-1)
-                token_probs = probs[range(len(token_ids[mask])), token_ids[mask]]
-                
-                # perplexity 기반 복잡도 점수 계산 (높을수록 어려운 단어)
-                avg_neg_log_prob = -torch.mean(torch.log(token_probs)).item()
-                complexity_score = min(1.0, avg_neg_log_prob / 10.0)  # 0~1 범위로 정규화
-                
-                return complexity_score
-                
-        except Exception as e:
-            logger.error(f"단어 복잡도 계산 중 오류 발생: {str(e)}")
-            return 0.5  # 오류 발생 시 중간값 반환
-
-    def _calculate_word_frequencies(self):
-        """말뭉치에서 단어 빈도 계산"""
-        frequencies = {}
-        total_words = 0
-        
-        for document in self.corpus.documents:
-            for word in document.words:
-                frequencies[word] = frequencies.get(word, 0) + 1
-                total_words += 1
-                
-        # 빈도를 비율로 변환
-        for word in frequencies:
-            frequencies[word] = frequencies[word] / total_words
+            complexity_score = torch.sigmoid(logits[0][1]).item()
+            return complexity_score
             
-        return frequencies
+        except Exception as e:
+            logger.error(f"단어 복잡도 계산 중 오류: {str(e)}")
+            return 0.5
+
+    def _calculate_difficulty_scores(self, embeddings):
+        # 이 메서드는 난이도 점수 계산 로직을 구현해야 합니다.
+        # 현재는 임시로 임베딩 값을 난이도 점수로 사용합니다.
+        return embeddings.mean(axis=0).tolist()

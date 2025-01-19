@@ -18,17 +18,14 @@ class ArticleService:
                 logger.error(f"폴더를 찾을 수 없습니다: {folder_path}")
                 return False, "폴더를 찾을 수 없습니다"
 
-            # 처리된 파일을 저장할 'processed' 폴더 생성
             processed_folder = os.path.join(folder_path, 'processed')
             os.makedirs(processed_folder, exist_ok=True)
 
             processed_files = []
             for filename in os.listdir(folder_path):
                 if filename.endswith('.json'):
-                    success = self._process_single_file(
-                        os.path.join(folder_path, filename),
-                        processed_folder
-                    )
+                    file_path = os.path.join(folder_path, filename)
+                    success = self.process_file(file_path)
                     if success:
                         processed_files.append(filename)
 
@@ -40,101 +37,83 @@ class ArticleService:
             logger.error(f"폴더 처리 중 오류 발생: {str(e)}")
             return False, str(e)
 
-    def _process_single_file(self, file_path: str, output_folder: str) -> bool:
+    def process_file(self, file_path: str) -> bool:
         try:
+            logger.info(f"=== 파일 처리 시작: {file_path} ===")
+            
+            # 파일 읽기
             with open(file_path, 'r', encoding='utf-8') as f:
                 article = json.load(f)
-
-            modified = False
-            total_words = 0
-            processed_words = set()
             
-            if 'content' in article:
-                new_content = []
-                for block in article['content']:
-                    if isinstance(block, dict) and block.get('type') == 'text' and total_words < 5:
-                        content = block.get('content', '')
-                        if content and len(content) > 10:
-                            # 새로운 난이도 기준 적용 (BERT + Korpora)
-                            difficult_words = self.bert_model.get_difficult_words(
-                                content, 
-                                threshold=0.65  # 빈도 정보가 추가되어 threshold 조정
-                            )
-                            
-                            # 난이도 점수로 정렬하고 중복 제거
-                            difficult_words = sorted(
-                                [word for word in difficult_words if word['word'] not in processed_words],
-                                key=lambda x: x['difficulty_score'],
-                                reverse=True
-                            )
-                            
-                            remaining_words = 5 - total_words
-                            difficult_words = difficult_words[:remaining_words]
-                            
-                            if difficult_words:
-                                # 디버깅을 위한 난이도 정보 로깅
-                                for word in difficult_words:
-                                    logger.debug(
-                                        f"선택된 단어: {word['word']}, "
-                                        f"난이도 점수: {word['difficulty_score']:.3f}, "
-                                        f"빈도: {word['frequency']:.6f}, "
-                                        f"BERT 점수: {word['bert_score']:.3f}"
-                                    )
-                                
-                                descriptions = self.processor._get_batch_descriptions(difficult_words)
-                                current_pos = 0
-                                
-                                for word in difficult_words:
-                                    if word['word'] in descriptions:
-                                        word_pos = content.find(word['word'], current_pos)
-                                        if word_pos != -1:
-                                            if word_pos > current_pos:
-                                                new_content.append({
-                                                    "type": "text",
-                                                    "content": content[current_pos:word_pos]
-                                                })
-                                            
-                                            new_content.append({
-                                                "type": "word",
-                                                "content": word['word'],
-                                                "description": descriptions[word['word']],
-                                                "difficulty_info": {  # 난이도 정보 추가
-                                                    "score": round(word['difficulty_score'], 3),
-                                                    "frequency": round(word['frequency'], 6),
-                                                    "bert_score": round(word['bert_score'], 3)
-                                                }
-                                            })
-                                            
-                                            current_pos = word_pos + len(word['word'])
-                                            processed_words.add(word['word'])
-                                            total_words += 1
-                                            modified = True
-                                
-                                if current_pos < len(content):
+            # 전체 텍스트에서 어려운 단어 추출
+            full_text = " ".join(
+                block['content'] for block in article['content'] 
+                if block['type'] == 'text'
+            )
+            
+            # 전체 텍스트에서 가장 어려운 단어 3개 추출
+            difficult_words = self.bert_model.get_difficult_words(full_text)[:3]
+            
+            # 단어 설명을 한 번에 가져오기
+            word_descriptions = self.processor.get_batch_descriptions(
+                [{'word': word_info['word']} for word_info in difficult_words]
+            )
+            
+            # 새로운 content 블록 리스트 생성
+            new_content = []
+            existing_words = set()
+            
+            # 각 텍스트 블록 처리
+            for block in article['content']:
+                if block['type'] == 'text':
+                    text = block['content']
+                    current_position = 0
+                    
+                    # 현재 텍스트 블록에서 어려운 단어 찾기
+                    for word_info in difficult_words:
+                        word = word_info['word']
+                        if word not in existing_words:
+                            word_position = text.find(word, current_position)
+                            if word_position != -1:
+                                # 단어 이전 텍스트 추가
+                                if word_position > current_position:
                                     new_content.append({
                                         "type": "text",
-                                        "content": content[current_pos:]
+                                        "content": text[current_position:word_position]
                                     })
-                            else:
-                                new_content.append(block)
-                        else:
-                            new_content.append(block)
-                    else:
-                        new_content.append(block)
-                
-                article['content'] = new_content
-
-            if modified:
-                output_filename = f"processed_{os.path.basename(file_path)}"
-                output_path = os.path.join(output_folder, output_filename)
-                
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    json.dump(article, f, ensure_ascii=False, indent=2)
-                
-                return True
-            else:
-                return False
-
+                                
+                                # word 블록 추가
+                                new_content.append({
+                                    "type": "word",
+                                    "content": word,
+                                    "description": word_descriptions.get(word, f"{word}에 대한 설명입니다.")
+                                })
+                                
+                                existing_words.add(word)
+                                current_position = word_position + len(word)
+                    
+                    # 남은 텍스트 추가
+                    if current_position < len(text):
+                        new_content.append({
+                            "type": "text",
+                            "content": text[current_position:]
+                        })
+                else:
+                    new_content.append(block)
+            
+            article['content'] = new_content
+            
+            # processed 폴더에 저장
+            output_folder = os.path.join(os.path.dirname(file_path), 'processed')
+            os.makedirs(output_folder, exist_ok=True)
+            output_path = os.path.join(output_folder, os.path.basename(file_path))
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(article, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"=== 파일 처리 완료: {file_path} ===")
+            return True
+            
         except Exception as e:
             logger.error(f"파일 처리 중 오류 발생: {str(e)}")
             return False    
