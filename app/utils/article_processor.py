@@ -112,7 +112,7 @@ class ArticleProcessor:
             
             # API 호출
             response = self.client.messages.create(
-                model="claude-3-sonnet-20240229",
+                model="claude-2.0",
                 max_tokens=1000,
                 messages=[{
                     "role": "user",
