@@ -11,6 +11,8 @@ import json  # 상단에 import 추가
 from functools import lru_cache
 from config import settings  # 설정 파일 import
 import numpy.typing as npt
+from flask import g
+import pymysql
 
 # numpy array 타입 정의
 ArrayType = TypeVar("ArrayType", bound=npt.NDArray[np.float32])
@@ -41,75 +43,100 @@ class VectorService:
     def _create_index(self):
         try:
             self.redis.ft("article_idx").create_index([
-                TextField("title"),
-                TextField("content"),
                 VectorField("embedding",
-                    "FLAT",
+                    "HNSW",  # FLAT 대신 HNSW 사용
                     {
                         "TYPE": "FLOAT32",
                         "DIM": self.VECTOR_DIM,
                         "DISTANCE_METRIC": "COSINE",
                         "INITIAL_CAP": 1000,
-                        "BLOCK_SIZE": 100
+                        # HNSW 특정 파라미터
+                        "M": 40,  # 각 레이어의 최대 이웃 수
+                        "EF_CONSTRUCTION": 200  # 인덱스 구축 시 탐색 범위
                     }
                 )
             ], definition=IndexDefinition(prefix=["article:"], index_type=IndexType.HASH))
-
+            
             self.redis.ft("user_idx").create_index([
                 TextField("user_id"),
                 TextField("article_id"),
                 TextField("action_type"),  # view, like, share
                 TextField("timestamp")
             ], definition=IndexDefinition(prefix=["user_action:"], index_type=IndexType.HASH))
-        except:
-            print("Index already exists")
+            
+            logger.info("Vector 인덱스 생성 완료 (HNSW)")
+        except Exception as e:
+            logger.error(f"인덱스 생성 중 에러: {str(e)}")
+            logger.info("이미 인덱스가 존재할 수 있음")
     
     def store_article(self, article_id, title, content):
-        """기사 저장"""
+        """기사 벡터 임베딩 저장"""
         try:
-            logger.info(f"=== 기사 저장 시작 === article_id: {article_id}")
+            logger.info(f"=== 기사 벡터 저장 시작 === article_id: {article_id}")
             
             # 임베딩 생성
             embedding = self.bert.get_embedding(content)
             logger.info(f"임베딩 생성 완료: shape={embedding.shape}")
             
-            # Redis에 저장
+            # Redis에는 벡터 데이터만 저장
             result = self.redis.hset(
                 f"article:{article_id}",
                 mapping={
-                    "title": title,
-                    "content": content,
                     "embedding": embedding.tobytes()
                 }
             )
-            logger.info(f"Redis 저장 완료: result={result}")
+            logger.info(f"Redis 벡터 저장 완료: result={result}")
             
             return True
             
         except Exception as e:
-            logger.error(f"기사 저장 중 에러 발생: {str(e)}", exc_info=True)
+            logger.error(f"기사 벡터 저장 중 에러 발생: {str(e)}", exc_info=True)
             raise e
     
     def search_similar(self, query_text, k=5):
-        query_embedding = self.bert.get_embedding(query_text)
-        
-        query = (
-            Query(
-                f"(*)=>[KNN {k} @embedding $vec_param AS score]"
+        """벡터 유사도 기반 검색"""
+        try:
+            query_embedding = self.bert.get_embedding(query_text)
+            
+            # Redis에서 유사한 벡터 검색
+            query = (
+                Query(
+                    f"(*)=>[KNN {k} @embedding $vec_param AS score]"
+                )
+                .sort_by("score")
+                .return_fields("score")  # 벡터 유사도 점수만 반환
+                .dialect(2)
+                .paging(0, k)
             )
-            .sort_by("score")
-            .return_fields("title", "content", "score")
-            .dialect(2)
-            .paging(0, k)
-        )
-        
-        results = self.redis.ft("article_idx").search(
-            query,
-            {
-                "vec_param": query_embedding.tobytes()
-            }
-        )
-        return results 
+            
+            results = self.redis.ft("article_idx").search(
+                query,
+                {
+                    "vec_param": query_embedding.tobytes()
+                }
+            )
+
+            # MySQL에서 기사 정보 조회
+            similar_articles = []
+            db = g.db
+            with db.cursor() as cursor:
+                for doc in results.docs:
+                    article_id = doc.id.split(':')[1]
+                    cursor.execute("""
+                        SELECT article_id, title, content, category 
+                        FROM article 
+                        WHERE article_id = %s
+                    """, (article_id,))
+                    article = cursor.fetchone()
+                    if article:
+                        article['score'] = float(doc.score)
+                        similar_articles.append(article)
+
+            return similar_articles
+            
+        except Exception as e:
+            logger.error(f"유사 기사 검색 중 에러: {str(e)}")
+            raise e
     
     def record_user_action(self, user_id: str, article_id: str, action_type: str):
         """사용자 행동을 Sorted Set으로 저장"""
@@ -234,7 +261,7 @@ class VectorService:
         
         return sorted(final_recs, key=lambda x: x['final_score'], reverse=True) 
     
-    def get_recommendations(self, user_id: str, context: dict = None, k: int = 10) -> List[Dict]:
+    def get_recommendations(self, user_id: str, seed: str = None, k: int = 50) -> List[str]:
         """사용자 맞춤 기사 추천"""
         try:
             logger.info(f"=== 추천 시작 === user_id: {user_id}, k: {k}")
@@ -246,7 +273,6 @@ class VectorService:
             # 1. 최근 본 기사들 조회
             recent_actions = self._get_recent_actions(user_id, hours=24)
             logger.info(f"최근 행동 수: {len(recent_actions)}")
-            logger.info(f"최근 행동: {recent_actions}")
             
             # 2. 컨텐츠 기반 추천
             content_scores = {}
@@ -283,35 +309,20 @@ class VectorService:
                             logger.error(f"기사 {article_id} 처리 중 에러: {str(e)}")
                             continue
             
-            # 3. 최종 추천 결과 생성
-            recommendations = []
-            for article_id, score in content_scores.items():
-                try:
-                    article_data = self.redis.hgetall(f"article:{article_id}")
-                    if article_data:
-                        title = article_data.get(b'title', b'').decode('utf-8')
-                        content = article_data.get(b'content', b'').decode('utf-8')
-                        
-                        recommendations.append({
-                            'article_id': article_id,
-                            'title': title,
-                            'content': content,
-                            'final_score': score
-                        })
-                except Exception as e:
-                    logger.error(f"기사 데이터 처리 중 에러: {str(e)}")
-                    continue
-            
-            # 점수로 정렬하고 상위 k개 반환
-            recommendations.sort(key=lambda x: x['final_score'], reverse=True)
-            logger.info(f"최종 추천 결과: {len(recommendations)}개")
-            
-            logger.info(f"=== 추천 완료 === 결과 수: {len(recommendations[:k])}")
-            return recommendations[:k]
+            # 시드 기반 랜덤성 추가
+            if seed:
+                np.random.seed(int(seed))
+                for article_id in content_scores:
+                    random_boost = np.random.uniform(0.9, 1.1)
+                    content_scores[article_id] *= random_boost
+
+            # 점수로 정렬하여 article_id 리스트만 반환
+            sorted_articles = sorted(content_scores.items(), key=lambda x: x[1], reverse=True)
+            return [str(article_id) for article_id, _ in sorted_articles[:k]]
             
         except Exception as e:
-            logger.error(f"추천 생성 중 에러 발생: {str(e)}", exc_info=True)
-            raise e 
+            logger.error(f"추천 생성 중 에러: {str(e)}")
+            return []
 
     def _get_session_interests(self, user_id: str) -> Dict[str, float]:
         """최근 세션의 관심사 분석"""
@@ -487,32 +498,26 @@ class VectorService:
             logger.error(f"최근 행동 조회 중 에러: {str(e)}")
             return []
 
-    def _get_article_category(self, title: str, content: str = None) -> str:
-        """기사 카테고리 분류"""
-        # 간단한 키워드 기반 분류
-        keywords = {
-            'investment': ['주식', '투자', '펀드', '자산'],
-            'banking': ['예금', '적금', '은행', '금리'],
-            'loan': ['대출', '담보', '신용', '이자'],
-            'insurance': ['보험', '보장', '청구', '가입'],
-            'real_estate': ['부동산', '아파트', '전세', '월세'],
-            'tech': ['기술', 'IT', '인공지능', '블록체인'],
-            'market': ['시장', '경제', '트렌드', '전망']
-        }
-        
-        text = f"{title} {content if content else ''}"
-        
-        # 각 카테고리별 키워드 매칭 수 계산
-        category_scores = {}
-        for category, words in keywords.items():
-            score = sum(1 for word in words if word in text)
-            category_scores[category] = score
-        
-        # 가장 높은 점수의 카테고리 반환
-        if any(category_scores.values()):
-            return max(category_scores.items(), key=lambda x: x[1])[0]
-        
-        return 'general'  # 기본 카테고리 
+    def _get_article_category(self, article_id: str) -> str:
+        """MySQL에서 기사 카테고리 조회"""
+        try:
+            db = g.db  # Flask의 application context에서 DB 연결 가져오기
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "SELECT category FROM article WHERE article_id = %s",
+                    (article_id,)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    return result['category']  # DictCursor를 사용하므로 컬럼명으로 접근
+                    
+                logger.warning(f"기사 {article_id}의 카테고리를 찾을 수 없습니다.")
+                return 'REAL_ESTATE'  # 기본 카테고리
+                
+        except Exception as e:
+            logger.error(f"카테고리 조회 중 에러: {str(e)}")
+            return 'REAL_ESTATE'  # 에러 발생 시 기본 카테고리 반환
 
     def search_similar_by_vector(self, query_vector: np.ndarray, k: int = 5):
         """벡터 기반 유사 기사 검색"""
@@ -609,11 +614,15 @@ class VectorService:
                         TextField("title"),
                         TextField("content"),
                         VectorField("embedding",
-                            "FLAT",
+                            "HNSW",  # FLAT 대신 HNSW 사용
                             {
                                 "TYPE": "FLOAT32",
                                 "DIM": self.VECTOR_DIM,
-                                "DISTANCE_METRIC": "COSINE"
+                                "DISTANCE_METRIC": "COSINE",
+                                "INITIAL_CAP": 1000,
+                                # HNSW 특정 파라미터
+                                "M": 40,  # 각 레이어의 최대 이웃 수
+                                "EF_CONSTRUCTION": 200  # 인덱스 구축 시 탐색 범위
                             }
                         )
                     ], definition=IndexDefinition(prefix=["article:"], index_type=IndexType.HASH))
