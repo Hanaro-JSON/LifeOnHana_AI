@@ -184,6 +184,50 @@ def recommend_loan_products():
         return jsonify({"error": "Invalid response format", "details": str(ve)}), 500
     except Exception as e:
         return jsonify({"error": "Unexpected error occurred", "details": str(e)}), 500
+
+
+@bp.route('/effect', methods=['POST'])
+def recommend_effect():
+    try:
+        data = request.json
+        product = data.get("product", {})
+        article_shorts = data.get("articleShorts", "").strip()
+        user_data = data.get("userData", {})
+        
+        # 요청 데이터 검증
+        if not product or not article_shorts:
+            return jsonify({"error": "Product and articleShorts are required"}), 400
+
+        category = product.get("category")
+        if category not in ["LOAN", "SAVINGS", "LIFE"]:
+            return jsonify({"error": "Invalid product category"}), 400
+
+        if category in ["LOAN", "SAVINGS"]:
+            # 금융 상품
+            prompt = f"""
+            {anthropic.HUMAN_PROMPT}
+            The user is considering a financial product. Below is the context:
+            
+            - Article Content: "{article_shorts}"
+            - Product Name: "{product.get('name', 'N/A')}"
+            - Description: "{product.get('description', 'N/A')}"
+            - Interest Rate: Basic: {product.get('basic_interest_rate', 'N/A')}, Max: {product.get('max_interest_rate', 'N/A')}
+            - Amount Range: Min: {product.get('min_amount', 'N/A')}, Max: {product.get('max_amount', 'N/A')}
+            
+            User's Financial Data:
+            - Total Asset: {user_data.get('total_asset', 0)}
+            - Deposit Amount: {user_data.get('deposit_amount', 0)}
+            - Savings Amount: {user_data.get('savings_amount', 0)}
+            - Loan Amount: {user_data.get('loan_amount', 0)}
+            
+            Please generate a personalized recommendation for the user regarding this financial product.
+            {anthropic.AI_PROMPT}
+            """
+        else:
+            # 라이프 상품
+            recent_histories = user_data.get("recent_histories", [])
+            formatted_histories = "\n".join(
+                f"- {history.get('category', 'N/A')}: {history.get('description', 'N/A')} (Amount: {history.get('amount', 'N/A')})"
                 for history in recent_histories
             )
             prompt = f"""
