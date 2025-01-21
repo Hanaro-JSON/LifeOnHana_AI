@@ -21,8 +21,8 @@ class BertEmbedding:
         self._load_korpora()
         
         # 한국어 사전 경로 지정
-        self.mecab = Mecab('/usr/lib/aarch64-linux-gnu/mecab/dic/mecab-ko-dic')
-        logger.info("모델 및 Korpora 초기화 완료")
+        # self.mecab = Mecab('/usr/lib/aarch64-linux-gnu/mecab/dic/mecab-ko-dic')
+        # logger.info("모델 및 Korpora 초기화 완료")
 
     def _load_korpora(self):
         try:

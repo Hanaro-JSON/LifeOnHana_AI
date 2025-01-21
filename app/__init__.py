@@ -23,15 +23,26 @@ db = pymysql.connect(
 def create_app():
     app = Flask(__name__)
     
-    # API 초기화 (변경)
+    # 로거 설정
+    
+    # 서비스 인스턴스를 앱 객체에 추가
+    app.redis_client = redis_service.client
+    app.bert_model = bert_model
+    
+    # API 초기화
     init_api(app)
     
     # 블루프린트 등록
     from .routes import article_routes
-    app.register_blueprint(article_routes.bp)
+    app.register_blueprint(article_routes.bp, url_prefix='/api/articles')
+    article_routes.init_vector_service(app)
     
     # Claude 블루프린트 추가
     from .routes import claude_routes
     app.register_blueprint(claude_routes.bp)
+    
+    # 벡터 서비스 초기화
+    vector_service.initialize_vectors()  # 모든 기사 벡터 생성
+    app.vector_service = vector_service  # Flask app에 서비스 추가
     
     return app 

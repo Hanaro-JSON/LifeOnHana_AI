@@ -1,3 +1,5 @@
+import os
+
 # 설정 파일 생성
 VECTOR_DIM = 768
 
@@ -21,4 +23,14 @@ REDIS_CONFIG = {
 CACHE_CONFIG = {
     'ttl': 3600,  # 1시간
     'max_size': 1000
+}
+
+# MySQL(RDS) 설정
+MYSQL_CONFIG = {
+    'host': 'lifeonhana.cxq2u4wk2434.ap-northeast-2.rds.amazonaws.com',
+    'user': 'admin',
+    'password': 'LifeOnHana1!',
+    'database': 'lifeonhana_serverDB',
+    'charset': 'utf8mb4',
+    'cursorclass': 'DictCursor'
 } 
