@@ -107,3 +107,112 @@ def related_products():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/recommend_loan_products', methods=['POST'])
+def recommend_loan_products():
+    data = request.json
+
+    # 요청 데이터 검증
+    reason = data.get('reason')
+    amount = data.get('amount')
+    user_data = data.get('userData', {})
+    products = data.get('products', [])
+
+    if not reason or not isinstance(reason, str) or not reason.strip():
+        return jsonify({"error": "'reason' must be a non-empty string"}), 400
+    if not amount or not isinstance(amount, (int, float)):
+        return jsonify({"error": "'amount' must be a valid number"}), 400
+    if not isinstance(products, list) or not products:
+        return jsonify({"error": "'products' must be a non-empty list"}), 400
+
+    # userData 기본값 설정
+    user_data = {
+        "deposit_amount": user_data.get("deposit_amount", 0),
+        "loan_amount": user_data.get("loan_amount", 0),
+        "real_estate_amount": user_data.get("real_estate_amount", 0),
+        "total_asset": user_data.get("total_asset", 0),
+    }
+
+    # Anthropic API 호출
+    try:
+        response = client.completions.create(
+            model="claude-2.0",
+            max_tokens_to_sample=2048,
+            prompt=f"""
+                {anthropic.HUMAN_PROMPT}
+                The user is requesting loan products for the reason: "{reason}", with a requested amount of {amount}.
+
+                The user's financial summary is:
+                - Deposit Amount: {user_data['deposit_amount']}
+                - Loan Amount: {user_data['loan_amount']}
+                - Real Estate Amount: {user_data['real_estate_amount']}
+                - Total Asset: {user_data['total_asset']}
+
+                Available loan products:
+                {json.dumps(products, ensure_ascii=False)}
+
+                Please return **the top 5 most relevant products** in JSON format:
+                [{{"id": 101, "score": 95}}, {{"id": 102, "score": 90}}]
+                {anthropic.AI_PROMPT}
+            """
+        )
+        analysis_result = response.completion.strip()
+
+        # JSON 배열 추출
+        match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
+        if not match:
+            raise ValueError("Invalid JSON format from Claude API")
+
+        json_data = match.group(0)
+        top_products = json.loads(json_data)
+
+        # 결과 생성
+        selected_products = [
+            {
+                **product,
+                "score": next((item["score"] for item in top_products if item["id"] == product["id"]), 0)
+            } for product in products if product["id"] in [item["id"] for item in top_products]
+        ]
+
+        selected_products.sort(key=lambda x: x["score"], reverse=True)
+        return jsonify({"products": selected_products[:5]}), 200
+
+    except json.JSONDecodeError as jde:
+        return jsonify({"error": "Failed to decode JSON response", "details": str(jde)}), 500
+    except ValueError as ve:
+        return jsonify({"error": "Invalid response format", "details": str(ve)}), 500
+    except Exception as e:
+        return jsonify({"error": "Unexpected error occurred", "details": str(e)}), 500
+                for history in recent_histories
+            )
+            prompt = f"""
+            {anthropic.HUMAN_PROMPT}
+            The following is a lifestyle product recommendation context:
+
+            - Article Content: "{article_shorts}"
+            - Product Name: "{product.get('name', 'N/A')}"
+            - Description: "{product.get('description', 'N/A')}"
+
+            User's Recent Activities:
+            {formatted_histories}
+
+            Generate a concise and engaging personalized recommendation for the user, without explicitly mentioning phrases like "Based on the context provided" or "Here is a personalized recommendation". Focus directly on the user's context and why this product is a good fit.
+            {anthropic.AI_PROMPT}
+            """
+
+        response = client.completions.create(
+            model="claude-2.0",
+            max_tokens_to_sample=1024,
+            prompt=prompt.strip()
+        )
+
+        analysis_result = response.completion.strip()
+
+        return jsonify({
+            "analysisResult": analysis_result,
+            "productLink": product.get("link", "N/A")
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
