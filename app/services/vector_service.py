@@ -1,26 +1,29 @@
-from redis.asyncio import Redis
+import logging
+import numpy as np
+from typing import List, Tuple, Optional
+from redis import Redis
 from redis.commands.search.field import TextField, VectorField
 from redis.commands.search.query import Query
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
-import numpy as np
 from datetime import datetime, timedelta
-from typing import List, Dict, TypeVar, Optional, Tuple
-import logging  # 추가
+from typing import List, Dict, TypeVar
 import math
-import json  # 상단에 import 추가
+import json
 from functools import lru_cache
-from config import settings  # 설정 파일 import
+from config import settings
 import numpy.typing as npt
 from flask import g
 import pymysql
 import torch
+from redis.exceptions import ResponseError
+from app.models.bert_model import BertEmbedding
+from pymysql.err import OperationalError
+import time
+
+logger = logging.getLogger(__name__)
 
 # numpy array 타입 정의
 ArrayType = TypeVar("ArrayType", bound=npt.NDArray[np.float32])
-
-# 로그 레벨 설정
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class VectorService:
     _instance = None
@@ -31,11 +34,11 @@ class VectorService:
             cls._instance = super(VectorService, cls).__new__(cls)
         return cls._instance
     
-    def __init__(self, redis_client=None, bert_model=None):
+    def __init__(self, redis_client: Redis, bert_model: BertEmbedding):
         """벡터 서비스 초기화 (한 번만 실행)"""
         if not self._initialized:
             self.redis = redis_client
-            self.bert = bert_model or BertService()
+            self.bert_model = bert_model
             
             # Redis 연결 확인
             try:
@@ -47,13 +50,11 @@ class VectorService:
             # 벡터 인덱스 존재 여부 확인
             try:
                 self.redis.execute_command('FT.INFO', 'article_idx')
-                logger.info("벡터 인덱스가 이미 존재함")
-            except Exception as e:
+            except ResponseError as e:
                 if 'Unknown index name' in str(e):
                     logger.info("벡터 인덱스 없음 - 초기화 시작")
                     self.initialize_vectors()
                 else:
-                    logger.error(f"벡터 인덱스 확인 중 에러: {str(e)}")
                     raise e
             
             self.__class__._initialized = True
@@ -114,7 +115,7 @@ class VectorService:
             logger.info(f"=== 기사 벡터 저장 시작 === article_id: {article_id}")
             
             # 임베딩 생성
-            embedding = self.bert.get_embedding(content)
+            embedding = self.bert_model.encode_text(content)
             logger.info(f"임베딩 생성 완료: shape={embedding.shape}")
             
             # Redis에는 벡터 데이터만 저장
@@ -135,7 +136,7 @@ class VectorService:
     def search_similar(self, query_text, k=5):
         """벡터 유사도 기반 검색"""
         try:
-            query_embedding = self.bert.get_embedding(query_text)
+            query_embedding = self.bert_model.encode_text(query_text)
             
             # Redis에서 유사한 벡터 검색
             query = (
@@ -630,7 +631,6 @@ class VectorService:
         """벡터로 유사한 기사 검색"""
         try:
             logger.info(f"벡터 검색 시작 - 벡터 shape: {vector.shape}")
-            logger.info(f"검색 벡터 타입: {type(vector)}, dtype: {vector.dtype}")
             
             # Redis 벡터 검색 쿼리 실행
             query_vector = vector.tobytes()
@@ -642,18 +642,15 @@ class VectorService:
                 'DIALECT', '2'
             )
             
-            logger.info(f"Redis 검색 결과: {results}")
-            
             # 결과 파싱
             if results and len(results) > 1:
                 similar_articles = []
                 for i in range(1, len(results), 2):
-                    doc_key = results[i]  # b'article:article2'
+                    doc_key = results[i]
                     if isinstance(doc_key, bytes):
                         article_id = doc_key.decode('utf-8').split(':')[1].replace('article', '')
-                        # 다음 항목은 [b'distance', b'0.955285251141'] 형식
                         distance = float(results[i+1][1])
-                        score = 1.0 - distance  # 거리를 유사도로 변환
+                        score = max(0, min(1, (1 - distance) * 2))
                         similar_articles.append((article_id, score))
             
             logger.info(f"파싱된 검색 결과: {similar_articles}")
@@ -661,84 +658,41 @@ class VectorService:
             
         except Exception as e:
             logger.error(f"벡터 검색 중 에러 발생: {str(e)}")
-            logger.error(f"에러 발생 시 결과: {results if 'results' in locals() else 'No results'}")
             return []
 
     @lru_cache(maxsize=1000)
-    def _get_article_vector(self, article_id: str) -> Optional[np.ndarray]:
-        """기사의 벡터 표현 조회 또는 생성"""
+    def _save_article_vector(self, article_id: str, vector: np.ndarray) -> bool:
+        """기사 벡터를 Redis에 저장"""
         try:
-            # Redis 키 생성 시 실제 article_id 사용
-            vector_key = f"article:{article_id}"  # "article:45" 형식으로 저장
-            vector_data = self.redis.get(vector_key)
+            # numpy array를 bytes로 변환
+            vector_bytes = vector.astype(np.float32).tobytes()
             
-            if vector_data:
-                return np.frombuffer(vector_data, dtype=np.float32)
+            # Redis에 저장할 데이터 준비
+            data = {
+                'article_id': str(article_id),
+                'embedding': vector_bytes
+            }
             
-            # Redis에 없으면 MySQL에서 기사 내용 조회하여 벡터 생성
-            with self._get_db_connection() as db:
-                with db.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT title, content 
-                        FROM article 
-                        WHERE article_id = %s
-                    """, (article_id,))
-                    article = cursor.fetchone()
-                    
-                    if not article:
-                        raise ValueError(f"Article {article_id} not found in database")
-                    
-                    # 제목과 내용 추출
-                    title = article['title']
-                    content = article['content']
-                    
-                    # JSON 파싱
-                    if isinstance(content, str):
-                        content = json.loads(content)
-                    
-                    # text 타입의 내용만 추출하여 합치기
-                    text_contents = []
-                    for item in content:
-                        if isinstance(item, dict):
-                            if item.get('type') == 'text':
-                                text_contents.append(item.get('content', ''))
-                            # word 타입도 포함 (설명과 함께)
-                            elif item.get('type') == 'word':
-                                word = item.get('content', '')
-                                desc = item.get('description', '')
-                                if word and desc:
-                                    text_contents.append(f"{word} - {desc}")
-                    
-                    # 최종 텍스트 생성 (제목 + 본문)
-                    full_text = f"{title} {' '.join(text_contents)}"
-                    
-                    # ALBERT 토크나이저로 토큰화
-                    tokens = self.bert.tokenizer.tokenize(full_text)
-                    if not tokens:
-                        raise ValueError("토큰화 결과가 없습니다")
-                        
-                    # 토큰을 ID로 변환
-                    token_ids = self.bert.tokenizer.convert_tokens_to_ids(tokens)
-                    
-                    # 최대 길이 제한 (config의 max_position_embeddings 참고)
-                    if len(token_ids) > 512:
-                        token_ids = token_ids[:512]
-                    
-                    # 모델 입력을 위한 텐서 생성
-                    input_ids = torch.tensor([token_ids])
-                    
-                    # ALBERT 모델로 벡터 생성
-                    with torch.no_grad():
-                        outputs = self.bert.model(input_ids)
-                        # [CLS] 토큰의 마지막 히든 스테이트를 벡터로 사용
-                        vector = outputs.last_hidden_state[:, 0, :].numpy().astype(np.float32)[0]
-                    
-                    # Redis에 벡터 캐시 (실제 article_id 사용)
-                    self.redis.set(vector_key, vector.tobytes())
-                    self.redis.expire(vector_key, 86400)  # 24시간 캐시
-                    
-                    return vector
-                
+            # Redis에 저장
+            key = f'article:article{article_id}'
+            self.redis.hset(key, mapping=data)
+            
+            logger.info(f"벡터 저장 완료 - article_id: {article_id}, vector_size: {len(vector_bytes)}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"벡터 저장 중 에러 발생: {str(e)}")
+            return False
+
+    @lru_cache(maxsize=1000)
+    def _get_article_vector(self, article_id: str) -> Optional[np.ndarray]:
+        """Redis에서 기사 벡터 조회"""
+        try:
+            # HASH에서 embedding 필드 조회
+            vector_bytes = self.redis.hget(f'article:article{article_id}', 'embedding')
+            if vector_bytes:
+                return np.frombuffer(vector_bytes, dtype=np.float32)
+            return None
         except Exception as e:
             logger.error(f"기사 벡터 조회 중 에러: {str(e)}")
             return None
@@ -893,131 +847,111 @@ class VectorService:
             logger.error(f"Redis 데이터 확인 중 에러: {str(e)}")
 
     def initialize_vectors(self):
-        """모든 기사의 벡터를 생성하여 Redis에 저장"""
+        """모든 기사의 벡터를 생성하고 Redis에 저장"""
+        connection = None
         try:
-            logger.info("=== 기사 벡터 초기화 시작 ===")
+            logger.info("=== 벡터 초기화 시작 ===")
             
-            # Redis 검색 인덱스 생성
+            # 1. Redis 검색 인덱스 생성
             try:
-                self.redis.execute_command(
-                    'FT.CREATE', 'article_idx', 'ON', 'HASH',
-                    'PREFIX', '1', 'article:',
-                    'SCHEMA', 'embedding', 'VECTOR', 'FLAT', '6', 
-                    'TYPE', 'FLOAT32', 'DIM', '768', 
-                    'DISTANCE_METRIC', 'COSINE',
-                    'article_id', 'TEXT'
-                )
-            except Exception as e:
-                if 'Index already exists' not in str(e):
-                    raise e
-            
-            # Redis에 저장된 기사 ID 목록 가져오기
-            existing_articles = set()
-            for key in self.redis.keys('article:*'):
+                # 기존 인덱스 확인
                 try:
-                    article_id = int(key.decode('utf-8').split(':')[1])
-                    existing_articles.add(article_id)
-                except:
-                    continue
+                    info = self.redis.ft("article_idx").info()
+                    logger.info(f"기존 인덱스 정보: {info}")
+                    # 기존 인덱스가 있으면 삭제
+                    self.redis.ft("article_idx").dropindex(delete_docs=False)
+                    logger.info("기존 인덱스 삭제 완료")
+                except Exception as e:
+                    logger.info(f"기존 인덱스 없음: {str(e)}")
+
+                # 잠시 대기 (인덱스 삭제 완료 대기)
+                time.sleep(1)
+
+                try:
+                    # 새 인덱스 생성
+                    self.redis.ft("article_idx").create_index([
+                        TextField("article_id", sortable=True),
+                        VectorField("embedding",
+                            "HNSW",
+                            {
+                                "TYPE": "FLOAT32",
+                                "DIM": 768,
+                                "DISTANCE_METRIC": "COSINE",
+                                "INITIAL_CAP": 1000,
+                                "M": 16,
+                                "EF_CONSTRUCTION": 200,
+                                "EF_RUNTIME": 10
+                            }
+                        )
+                    ], definition=IndexDefinition(prefix=["article:"], index_type=IndexType.HASH))
+                    
+                    logger.info("새 벡터 인덱스 생성 완료")
+                except ResponseError as e:
+                    if 'Index already exists' in str(e):
+                        logger.info("인덱스가 이미 존재함")
+                    else:
+                        raise e
             
-            # MySQL에서 아직 벡터가 생성되지 않은 기사만 조회
-            with self._get_db_connection() as db:
-                with db.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT article_id, title, content 
-                        FROM article
-                        ORDER BY article_id
-                    """)
+            except Exception as e:
+                logger.error(f"인덱스 생성 중 에러: {str(e)}")
+                raise e
+
+            # 2. DB에서 모든 기사 조회
+            try:
+                connection = pymysql.connect(
+                    host='lifeonhana.cxq2u4wk2434.ap-northeast-2.rds.amazonaws.com',
+                    user='admin',
+                    password='LifeOnHana1!',
+                    database='lifeonhana_serverDB',
+                    cursorclass=pymysql.cursors.DictCursor
+                )
+                
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT article_id as id, content FROM article")
                     articles = cursor.fetchall()
                     
-                    # 이미 벡터가 있는 기사 필터링
-                    articles = [
-                        article for article in articles 
-                        if article['article_id'] not in existing_articles
-                    ]
-                    
-                    if not articles:
-                        logger.info("모든 기사의 벡터가 이미 생성되어 있습니다.")
-                        return
-                    
-                    total = len(articles)
-                    logger.info(f"총 {total}개 기사 처리 시작")
-                    
-                    for i, article in enumerate(articles, 1):
+                    # 3. 각 기사의 벡터 생성 및 저장
+                    for article in articles:
                         try:
-                            article_id = article['article_id']
-                            logger.info(f"기사 {article_id} 처리 중... ({i}/{total})")
+                            content = json.loads(article["content"])  # JSON 필드 파싱
+                            article_id = str(article["id"])
                             
-                            # Redis에 이미 있는지 확인
-                            vector_key = f"article:{article_id}"
-                            if self.redis.exists(vector_key):
-                                logger.info(f"기사 {article_id}는 이미 처리됨, 건너뜀")
+                            # 이미 존재하는 벡터는 건너뛰기
+                            if self.redis.exists(f'article:article{article_id}'):
+                                logger.info(f"기사 {article_id}의 벡터가 이미 존재함")
                                 continue
-                            
-                            title = article['title']
-                            content = article['content']
-                            
-                            # JSON 파싱
-                            if isinstance(content, str):
-                                content = json.loads(content)
-                            
-                            # text 타입의 내용만 추출하여 합치기
-                            text_contents = []
-                            for item in content:
-                                if isinstance(item, dict):
-                                    if item.get('type') == 'text':
-                                        text_contents.append(item.get('content', ''))
-                                    elif item.get('type') == 'word':
-                                        word = item.get('content', '')
-                                        desc = item.get('description', '')
-                                        if word and desc:
-                                            text_contents.append(f"{word} - {desc}")
-                            
-                            # 최종 텍스트 생성 (제목 + 본문)
-                            full_text = f"{title} {' '.join(text_contents)}"
-                            logger.info(f"기사 {article_id} 텍스트 추출 완료 (길이: {len(full_text)})")
-                            
-                            # ALBERT 토크나이저로 토큰화
-                            tokens = self.bert.tokenizer.tokenize(full_text)
-                            if not tokens:
-                                raise ValueError("토큰화 결과가 없습니다")
-                            logger.info(f"기사 {article_id} 토큰화 완료 (토큰 수: {len(tokens)})")
                                 
-                            # 토큰을 ID로 변환
-                            token_ids = self.bert.tokenizer.convert_tokens_to_ids(tokens)
-                            
-                            # 최대 길이 제한
-                            if len(token_ids) > 512:
-                                token_ids = token_ids[:512]
-                                logger.info(f"기사 {article_id} 토큰 길이 제한 (512)")
-                            
-                            # 모델 입력을 위한 텐서 생성
-                            input_ids = torch.tensor([token_ids])
-                            
-                            # ALBERT 모델로 벡터 생성
-                            logger.info(f"기사 {article_id} 벡터 생성 중...")
-                            with torch.no_grad():
-                                outputs = self.bert.model(input_ids)
-                                vector = outputs.last_hidden_state[:, 0, :].numpy().astype(np.float32)[0]
-                            
-                            # Redis에 HASH 형식으로 벡터 저장
+                            # 벡터 생성
+                            vector = self.bert_model.encode(content)
+                            if vector is None or not isinstance(vector, np.ndarray):
+                                logger.error(f"기사 {article_id}의 벡터 생성 실패")
+                                continue
+                                
+                            # 벡터 저장
+                            vector_bytes = vector.astype(np.float32).tobytes()
                             self.redis.hset(
-                                vector_key,
+                                f'article:article{article_id}',
                                 mapping={
-                                    'embedding': vector.tobytes(),
-                                    'article_id': str(article_id)
+                                    'article_id': article_id,
+                                    'embedding': vector_bytes
                                 }
                             )
-                            logger.info(f"기사 {article_id} 벡터 저장 완료")
+                            logger.info(f"기사 {article_id}의 벡터 생성 및 저장 완료")
                             
                         except Exception as e:
-                            logger.error(f"기사 {article_id} 처리 중 에러: {str(e)}")
+                            logger.error(f"기사 {article.get('id', 'unknown')} 처리 중 에러: {str(e)}")
                             continue
+
+                    logger.info("모든 기사의 벡터 초기화 완료")
                     
-                    # 초기화 완료 후 데이터 확인
-                    self._check_redis_data()
-                    logger.info("=== 기사 벡터 초기화 완료 ===")
-                    
+            except Exception as e:
+                logger.error(f"DB 처리 중 에러: {str(e)}")
+                raise e
+
         except Exception as e:
             logger.error(f"벡터 초기화 중 에러 발생: {str(e)}")
-            raise e 
+            raise e
+
+        finally:
+            if connection:
+                connection.close() 

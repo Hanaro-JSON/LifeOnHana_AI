@@ -242,3 +242,37 @@ class BertEmbedding:
         # 이 메서드는 난이도 점수 계산 로직을 구현해야 합니다.
         # 현재는 임시로 임베딩 값을 난이도 점수로 사용합니다.
         return embeddings.mean(axis=0).tolist()
+
+    def encode(self, text: str) -> np.ndarray:
+        """텍스트를 벡터로 인코딩"""
+        try:
+            # 입력이 dict나 list인 경우 문자열로 변환
+            if isinstance(text, (dict, list)):
+                text = json.dumps(text, ensure_ascii=False)
+            
+            inputs = self.tokenizer(
+                text,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512
+            )
+            
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                # CLS 토큰의 마지막 레이어 hidden state를 사용
+                embeddings = outputs.last_hidden_state[:, 0, :].numpy()
+                # 1차원 벡터로 변환 (768,)
+                embeddings = embeddings.squeeze().astype(np.float32)
+                
+                # 벡터가 1차원이 아니면 강제로 변환
+                if embeddings.ndim != 1:
+                    embeddings = embeddings.reshape(-1)
+                
+                logger.info(f"생성된 벡터 shape: {embeddings.shape}, dtype: {embeddings.dtype}")
+                return embeddings
+            
+        except Exception as e:
+            logger.error(f"텍스트 인코딩 중 오류: {str(e)}")
+            # 오류 발생 시 768차원의 0 벡터 반환
+            return np.zeros(768, dtype=np.float32)
