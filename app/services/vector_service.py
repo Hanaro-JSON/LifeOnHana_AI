@@ -133,7 +133,7 @@ class VectorService:
             logger.error(f"기사 벡터 저장 중 에러 발생: {str(e)}", exc_info=True)
             raise e
     
-    def search_similar(self, query_text, k=5):
+    def search_similar(self, query_text, k=110):
         """벡터 유사도 기반 검색"""
         try:
             query_embedding = self.bert_model.encode_text(query_text)
@@ -306,6 +306,18 @@ class VectorService:
         try:
             logger.info(f"=== 추천 시작 === user_id: {user_id}, k: {k}")
             
+            # 전체 기사 수 확인을 위한 로깅 추가
+            with self._get_db_connection() as db:
+                with db.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) as total FROM article")
+                    total_count = cursor.fetchone()['total']
+                    logger.info(f"데이터베이스 전체 기사 수: {total_count}")
+                    
+                    # 실제 조회되는 기사 확인
+                    cursor.execute("SELECT article_id FROM article ORDER BY published_at DESC LIMIT %s", (k,))
+                    available_articles = cursor.fetchall()
+                    logger.info(f"조회 가능한 기사 수: {len(available_articles)}")
+
             # AB 테스트 그룹 결정
             ab_group = self._get_ab_test_group(user_id)
             logger.info(f"AB 테스트 그룹: {ab_group}")
@@ -354,6 +366,24 @@ class VectorService:
                         if similar_id not in content_scores:
                             content_scores[similar_id] = 0
                         content_scores[similar_id] += score
+            
+            # 추천 결과가 부족한 경우 랜덤 기사로 보충
+            if len(content_scores) < k:
+                logger.info(f"추천 결과 부족 ({len(content_scores)} < {k}) - 랜덤 기사로 보충")
+                with self._get_db_connection() as db:
+                    with db.cursor() as cursor:
+                        existing_ids = tuple(content_scores.keys()) or (0,)  # 빈 튜플 방지
+                        cursor.execute("""
+                            SELECT article_id 
+                            FROM article 
+                            WHERE article_id NOT IN %s
+                            AND published_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                            ORDER BY RAND()  # RAND() 함수로 랜덤 정렬
+                            LIMIT %s
+                        """, (existing_ids, k - len(content_scores)))
+                        additional = cursor.fetchall()
+                        for result in additional:
+                            content_scores[str(result['article_id'])] = 0.5  # 기본 점수 부여
             
             # 점수로 정렬하여 상위 k개 반환
             recommended = sorted(content_scores.items(), key=lambda x: x[1], reverse=True)[:k]
