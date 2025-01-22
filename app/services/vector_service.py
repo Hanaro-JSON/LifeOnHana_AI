@@ -19,6 +19,7 @@ from redis.exceptions import ResponseError
 from app.models.bert_model import BertEmbedding
 from pymysql.err import OperationalError
 import time
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +385,14 @@ class VectorService:
                         additional = cursor.fetchall()
                         for result in additional:
                             content_scores[str(result['article_id'])] = 0.5  # 기본 점수 부여
+            
+            # 점수로 정렬하기 전에 seed 기반 랜덤 노이즈 추가
+            if seed:
+                random.seed(f"{user_id}_{seed}")  # 사용자와 seed 조합으로 일관된 랜덤값 생성
+                for article_id in content_scores:
+                    # 원래 점수에 ±5% 범위의 랜덤 노이즈 추가
+                    noise = 1 + (random.random() - 0.2) * 0.1
+                    content_scores[article_id] *= noise
             
             # 점수로 정렬하여 상위 k개 반환
             recommended = sorted(content_scores.items(), key=lambda x: x[1], reverse=True)[:k]
