@@ -31,7 +31,7 @@ def related_products():
     try:
         # `type`이 "TEXT"인 항목만 필터링하여 문자열로 결합
         user_prompt = " ".join(
-            part['content'] for part in content if part.get('type') == 'TEXT'
+            part['content'] for part in content if part.get('type') == 'text'
         )
 
         if not user_prompt.strip():  # 필터링 결과가 비어있다면 에러 처리
