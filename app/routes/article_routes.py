@@ -1,146 +1,74 @@
-from flask import Blueprint, request, jsonify
-from .. import vector_service
-import traceback
+from flask import Blueprint, jsonify, request, current_app
+import os
+from app.services.article_service import ArticleService
+from ..services.vector_service import VectorService
 
 bp = Blueprint('articles', __name__)
+article_service = ArticleService()
+vector_service = None
 
-@bp.route('/')
-def hello():
-    return 'Flask server is running!'
+def init_vector_service(app):
+    global vector_service
+    with app.app_context():
+        vector_service = VectorService(app.redis_client, app.bert_model)
 
-@bp.route('/test_embedding', methods=['POST'])
-def test_embedding():
-    data = request.json
-    text = data.get('text', '')
-    try:
-        embedding = vector_service.bert.get_embedding(text)
-        return jsonify({
-            "text": text,
-            "embedding_size": len(embedding),
-            "embedding_sample": embedding[:5].tolist()
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+def get_vector_service():
+    global vector_service
+    if vector_service is None:
+        vector_service = VectorService(current_app.redis_client, current_app.bert_model)
+    return vector_service
 
-@bp.route('/articles', methods=['POST'])
-def add_article():
-    data = request.json
-    try:
-        vector_service.store_article(
-            article_id=data['id'],
-            title=data['title'],
-            content=data['content']
-        )
-        return jsonify({"status": "success"}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@bp.route('/articles/similar', methods=['POST'])
-def find_similar():
-    data = request.json
-    try:
-        results = vector_service.search_similar(data['query'])
-        similar_articles = [{
-            "title": doc.title,
-            "content": doc.content,
-            "similarity": 1 - float(doc.score)
-        } for doc in results.docs]
-        return jsonify(similar_articles)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400 
+ARTICLES_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'utils', 'hanathenext_articles')
 
 @bp.route('/recommendations', methods=['GET'])
 def get_recommendations():
-    user_id = request.args.get('user_id')
-    k = int(request.args.get('k', 10))
-    
-    # 컨텍스트 정보 추가
-    context = {
-        'time_of_day': vector_service._get_time_of_day(),
-        'platform': request.args.get('platform', 'web'),
-        'location': request.args.get('location', 'unknown')
-    }
-    
+    """사용자 맞춤 기사 추천 API"""
     try:
-        recommendations = vector_service.get_recommendations(user_id, context, k)
-        return jsonify(recommendations)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@bp.route('/articles/<article_id>', methods=['GET'])
-def view_article(article_id):
-    """기사 조회"""
-    try:
-        # 기사 조회 로직만 남기고 행동 기록 제거
-        article = get_article(article_id)
-        return jsonify(article)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@bp.route('/articles/<article_id>/like', methods=['POST'])
-def like_article(article_id):
-    """기사 좋아요"""
-    try:
-        # 1. 좋아요 처리
-        # 2. 내부적으로 행동 기록
-        vector_service.record_user_action(
-            user_id=request.headers['user_id'],
-            article_id=article_id,
-            action_type='like'
-        )
+        user_id = request.args.get('userId')
+        size = request.args.get('size', default=20, type=int)
+        seed = request.args.get('seed')
         
-        return jsonify({"status": "success"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400 
-
-@bp.route('/user/action', methods=['POST'])
-def record_action():
-    """사용자 행동 기록"""
-    data = request.json
-    try:
-        vector_service.record_user_action(
-            user_id=data['user_id'],
-            article_id=data['article_id'],
-            action_type=data['action_type']
-        )
-        return jsonify({"status": "success"}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400 
-
-@bp.route('/articles/check', methods=['GET'])
-def check_articles():
-    """저장된 기사 확인"""
-    try:
-        # Redis에서 모든 기사 키 검색
-        articles = []
-        for key in vector_service.redis.scan_iter("article:*"):
-            if isinstance(key, bytes):
-                key = key.decode('utf-8')
-                
-            article_data = {}
-            # 각 필드를 개별적으로 가져와서 처리
-            raw_data = vector_service.redis.hgetall(key)
+        if not user_id:
+            return jsonify({
+                "code": 400,
+                "status": "BAD_REQUEST",
+                "message": "userId가 필요합니다.",
+                "data": None
+            }), 400
             
-            for field, value in raw_data.items():
-                field = field.decode('utf-8') if isinstance(field, bytes) else field
-                if field == 'embedding':
-                    article_data[field] = 'exists' if value else 'missing'
-                else:
-                    article_data[field] = value.decode('utf-8') if isinstance(value, bytes) else value
-            
-            articles.append({
-                'key': key,
-                'data': article_data
-            })
+        vector_service = get_vector_service()
+        recommended_articles = vector_service.get_recommendations(user_id, seed, size)
         
         return jsonify({
-            'article_count': len(articles),
-            'articles': articles,
-            'vector_dim': vector_service.VECTOR_DIM
-        }), 200
+            "code": 200,
+            "status": "OK",
+            "message": "추천 목록 조회 성공",
+            "data": {
+                "recommendedArticles": recommended_articles
+            }
+        })
         
     except Exception as e:
+        current_app.logger.error(f"추천 API 에러: {str(e)}")
         return jsonify({
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }), 400 
+            "code": 500,
+            "status": "INTERNAL_SERVER_ERROR",
+            "message": "서버 에러가 발생했습니다.",
+            "data": None
+        }), 500
+
+@bp.route('/process-folder', methods=['POST'])
+def process_folder():
+    try:
+        current_app.logger.info(f"작업 폴더 경로: {ARTICLES_FOLDER}")
+        service = get_vector_service()
+        success, message = article_service.process_folder(ARTICLES_FOLDER)
+        
+        if success:
+            return jsonify({"status": "success", "message": message})
+        else:
+            return jsonify({"status": "error", "message": message})
+            
+    except Exception as e:
+        current_app.logger.error(f"Error in process_folder: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}) 
