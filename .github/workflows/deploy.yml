@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -12,23 +13,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-    - name: Deploy to EC2
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_KEY }}
-        script: |
-          echo "SSH connection successful!"
-          set -e  # 스크립트 실행 중 오류 발생 시 중지
-          cd ~/LifeOnHana_AI
-          echo "Pulling latest code..."
-          git pull origin develop
-          echo "Stopping existing containers..."
-          docker-compose down
-          echo "Building Docker images..."
-          docker-compose build --no-cache
-          echo "Starting new containers..."
-          docker-compose up -d
-          echo "Deployment completed successfully."
-
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            echo "SSH connection successful!"
+            set -e  # 스크립트 실행 중 오류 발생 시 중지
+            cd ~/LifeOnHana_AI
+            echo "Pulling latest code..."
+            git pull origin develop
+            echo "Stopping existing containers..."
+            docker-compose down
+            echo "Building Docker images..."
+            docker-compose build --no-cache
+            echo "Starting new containers..."
+            docker-compose up -d
+            echo "Deployment completed successfully."
