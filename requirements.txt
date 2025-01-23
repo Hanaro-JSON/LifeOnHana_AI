@@ -5,7 +5,6 @@ torch>=1.4.1
 numpy<1.25.0
 anthropic
 sqlalchemy
-pymysql
 requests>=2.31.0
 scikit-learn>=0.24.0
 sentencepiece>=0.1.99
