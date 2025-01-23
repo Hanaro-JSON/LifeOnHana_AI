@@ -1,1 +1,1 @@
-Life On Hana의 Flask 서버 !
+Life On Hana의 Flask 서버
