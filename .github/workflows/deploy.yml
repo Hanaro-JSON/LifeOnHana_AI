@@ -9,20 +9,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 레포지토리 코드 체크아웃
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. EC2 서버에 접속해서 Docker 배포
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_KEY }}
-          script: |
-            cd ~/LifeOnHana_AI
-            git pull origin develop  # 최신 코드 가져오기
-            docker-compose down   # 기존 컨테이너 중지
-            docker-compose build --no-cache
-            docker-compose up -d  # 새 컨테이너 실행
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          echo "SSH connection successful!"
+          set -e  # 스크립트 실행 중 오류 발생 시 중지
+          cd ~/LifeOnHana_AI
+          echo "Pulling latest code..."
+          git pull origin develop
+          echo "Stopping existing containers..."
+          docker-compose down
+          echo "Building Docker images..."
+          docker-compose build --no-cache
+          echo "Starting new containers..."
+          docker-compose up -d
+          echo "Deployment completed successfully."
+
