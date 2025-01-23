@@ -2,7 +2,7 @@ services:
   flask:
     build: .
     ports:
-      - "5001:5000"
+      - "5000:5000"
     volumes:
       - .:/app
       - model_cache:/root/.cache/huggingface # 모델 캐시 별도 볼륨
