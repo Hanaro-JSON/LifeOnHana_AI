@@ -1,0 +1,29 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 레포지토리 코드 체크아웃
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. EC2 서버에 접속하여 Docker 배포
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            cd ~/LifeOnHana_AI
+            git pull origin develop  # 최신 코드 가져오기
+            docker-compose down      # 기존 컨테이너 중지
+            docker-compose up -d     # 새 컨테이너 실행
+            sudo systemctl reload nginx  # Nginx 재로드
