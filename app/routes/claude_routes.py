@@ -7,6 +7,10 @@ import re
 
 bp = Blueprint('claude', __name__)
 
+@bp.route("/")  # 기본 경로 추가
+def home():
+    return "Welcome to the LifeOnHana AI Service!"
+
 # 클로드 API 설정
 API_KEY = os.getenv("CLAUDE_API_KEY", "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")
 client = anthropic.Anthropic(api_key=API_KEY)
