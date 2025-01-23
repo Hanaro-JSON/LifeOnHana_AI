@@ -34,7 +34,7 @@ def create_app():
     
     # 블루프린트 등록
     from .routes import article_routes
-    app.register_blueprint(article_routes.bp, url_prefix='/api/articles')
+    app.register_blueprint(article_routes.bp)
     article_routes.init_vector_service(app)
     
     # Claude 블루프린트 추가
