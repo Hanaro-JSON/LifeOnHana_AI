@@ -27,6 +27,9 @@ def get_recommendations():
         user_id = request.args.get('userId')
         size = request.args.get('size', default=20, type=int)
         seed = request.args.get('seed')
+
+        current_app.logger.info(f"Received userId: {user_id}, size: {size}, seed: {seed}")
+        
         
         if not user_id:
             return jsonify({
