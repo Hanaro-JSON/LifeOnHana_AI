@@ -20,7 +20,19 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
           script: |
-            docker-compose logs
+            echo "Checking and cleaning up disk space..."
+            # Docker 이미지와 컨테이너 정리
+            docker image prune -a -f
+            docker container prune -f
+            docker volume prune -f
+            docker builder prune -a -f
+
+            # 로그 파일 정리
+            sudo find /var/lib/docker/containers/ -type f -name "*.log" -exec truncate -s 0 {} \;
+
+            # 디스크 사용량 확인
+            df -h
+
             echo "SSH connection successful!"
             set -e  # 스크립트 실행 중 오류 발생 시 중지
             cd ~/LifeOnHana_AI
