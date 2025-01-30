@@ -44,7 +44,7 @@ def related_products():
         # 데이터베이스에서 모든 상품 조회
         query = text("""
             SELECT product_id, name, description, category, link
-            FROM product_test
+            FROM product
         """)
         with engine.connect() as connection:
             products = connection.execute(query).mappings().fetchall()
