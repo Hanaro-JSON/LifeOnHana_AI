@@ -27,10 +27,10 @@ CACHE_CONFIG = {
 
 # MySQL(RDS) 설정
 MYSQL_CONFIG = {
-    'host': 'lifeonhana.cxq2u4wk2434.ap-northeast-2.rds.amazonaws.com',
-    'user': 'admin',
+    'host': 'seochodb.cnisi2wyicv7.ap-northeast-2.rds.amazonaws.com',
+    'user': 'json',
     'password': 'LifeOnHana1!',
-    'database': 'lifeonhana_serverDB',
+    'database': 'lifeonhanaDB',
     'charset': 'utf8mb4',
     'cursorclass': 'DictCursor'
 } 

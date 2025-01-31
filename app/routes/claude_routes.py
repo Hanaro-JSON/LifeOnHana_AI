@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 import os
 import json
 import re
+from setting import MYSQL_CONFIG
 
 bp = Blueprint('claude', __name__)
 
@@ -12,19 +13,19 @@ def home():
     return "Welcome to the LifeOnHana AI Service!"
 
 # 클로드 API 설정
-API_KEY = os.getenv("CLAUDE_API_KEY", "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")
+API_KEY = os.getenv("CLAUDE_API_KEY", "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")
 client = anthropic.Anthropic(api_key=API_KEY)
 
 # 데이터베이스 연결 설정
-DB_ENDPOINT = "lifeonhana.cxq2u4wk2434.ap-northeast-2.rds.amazonaws.com"
-DB_PORT = 3306
-DB_USERNAME = "admin"
-DB_PASSWORD = "LifeOnHana1!"
-DB_NAME = "lifeonhana_serverDB"
+# DB_ENDPOINT = "seochodb.cnisi2wyicv7.ap-northeast-2.rds.amazonaws.com"
+# DB_PORT = 3306
+# DB_USERNAME = "json"
+# DB_PASSWORD = "LifeOnHana1!"
+# DB_NAME = "lifeonhanaDB"
 
-DATABASE_URL = f"mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}:{DB_PORT}/{DB_NAME}"
+# DATABASE_URL = f"mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = f"mysql+pymysql://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
 engine = create_engine(DATABASE_URL)
-
 
 @bp.route('/related_products', methods=['POST'])
 def related_products():
@@ -58,8 +59,8 @@ def related_products():
 
         # 클로드 API 호출
         response = client.completions.create(
-            model="claude-2.0",
-            max_tokens_to_sample=4096,
+            model="claude-3.5-haiku",
+            max_tokens_to_sample=2048,
             prompt=f"""
                 {anthropic.HUMAN_PROMPT}
                 The following is an article content about inheritance and gifting:
@@ -141,7 +142,7 @@ def recommend_loan_products():
     # Anthropic API 호출
     try:
         response = client.completions.create(
-            model="claude-2.0",
+            model="claude-3.5-haiku",
             max_tokens_to_sample=2048,
             prompt=f"""
                 {anthropic.HUMAN_PROMPT}
@@ -250,8 +251,8 @@ def recommend_effect():
             """
 
         response = client.completions.create(
-            model="claude-2.0",
-            max_tokens_to_sample=1024,
+            model="claude-3.5-haiku",
+            max_tokens_to_sample=4096,
             prompt=prompt.strip()
         )
 

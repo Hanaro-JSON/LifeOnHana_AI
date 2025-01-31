@@ -5,6 +5,7 @@ from .services.vector_service import VectorService
 import os
 import pymysql  # flask_mysqldb 대신 pymysql 사용
 from .api import init_api  # 변경
+from setting import MYSQL_CONFIG
 
 # 서비스 인스턴스 생성
 redis_service = RedisService()
@@ -13,17 +14,16 @@ vector_service = VectorService(redis_service.client, bert_model)
 
 # MySQL 연결
 db = pymysql.connect(
-    host='lifeonhana.cxq2u4wk2434.ap-northeast-2.rds.amazonaws.com',
-    user='admin',
-    password='LifeOnHana1!',
-    database='lifeonhana_serverDB',
-    cursorclass=pymysql.cursors.DictCursor
+    host=MYSQL_CONFIG['host'],
+    user=MYSQL_CONFIG['user'],
+    password=MYSQL_CONFIG['password'],
+    database=MYSQL_CONFIG['database'],
+    charset=MYSQL_CONFIG.get('charset', 'utf8mb4'),
+    cursorclass=MYSQL_CONFIG.get('cursorclass', pymysql.cursors.DictCursor)
 )
 
 def create_app():
     app = Flask(__name__)
-    
-    # 로거 설정
     
     # 서비스 인스턴스를 앱 객체에 추가
     app.redis_client = redis_service.client
