@@ -27,7 +27,6 @@ client = anthropic.Anthropic(api_key=API_KEY)
 DATABASE_URL = f"mysql+pymysql://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
 engine = create_engine(DATABASE_URL)
 
-
 @bp.route('/related_products', methods=['POST'])
 def related_products():
     content = request.json.get('content')  # JSON 배열 가져오기
@@ -60,8 +59,8 @@ def related_products():
 
         # 클로드 API 호출
         response = client.completions.create(
-            model="claude-2.0",
-            max_tokens_to_sample=4096,
+            model="claude-3.5-haiku",
+            max_tokens_to_sample=2048,
             prompt=f"""
                 {anthropic.HUMAN_PROMPT}
                 The following is an article content about inheritance and gifting:
@@ -143,7 +142,7 @@ def recommend_loan_products():
     # Anthropic API 호출
     try:
         response = client.completions.create(
-            model="claude-2.0",
+            model="claude-3.5-haiku",
             max_tokens_to_sample=2048,
             prompt=f"""
                 {anthropic.HUMAN_PROMPT}
@@ -252,8 +251,8 @@ def recommend_effect():
             """
 
         response = client.completions.create(
-            model="claude-2.0",
-            max_tokens_to_sample=1024,
+            model="claude-3.5-haiku",
+            max_tokens_to_sample=4096,
             prompt=prompt.strip()
         )
 
