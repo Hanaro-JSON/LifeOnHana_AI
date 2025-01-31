@@ -4,7 +4,8 @@ from sqlalchemy import create_engine, text
 import os
 import json
 import re
-from setting import MYSQL_CONFIG
+from config.settings import MYSQL_CONFIG
+
 
 bp = Blueprint('claude', __name__)
 
