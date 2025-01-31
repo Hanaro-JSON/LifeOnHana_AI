@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 import os
 import json
 import re
+from setting import MYSQL_CONFIG
 
 bp = Blueprint('claude', __name__)
 
@@ -16,13 +17,14 @@ API_KEY = os.getenv("CLAUDE_API_KEY", "sk-ant-api03-AWpNjXNbdGp1gursWq2eWPR8Eq-n
 client = anthropic.Anthropic(api_key=API_KEY)
 
 # 데이터베이스 연결 설정
-DB_ENDPOINT = "lifeonhana.cxq2u4wk2434.ap-northeast-2.rds.amazonaws.com"
-DB_PORT = 3306
-DB_USERNAME = "admin"
-DB_PASSWORD = "LifeOnHana1!"
-DB_NAME = "lifeonhana_serverDB"
+# DB_ENDPOINT = "seochodb.cnisi2wyicv7.ap-northeast-2.rds.amazonaws.com"
+# DB_PORT = 3306
+# DB_USERNAME = "json"
+# DB_PASSWORD = "LifeOnHana1!"
+# DB_NAME = "lifeonhanaDB"
 
-DATABASE_URL = f"mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}:{DB_PORT}/{DB_NAME}"
+# DATABASE_URL = f"mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = f"mysql+pymysql://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
 engine = create_engine(DATABASE_URL)
 
 
