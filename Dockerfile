@@ -55,3 +55,4 @@ EXPOSE 5001
 # docker-compose.yml의 command와 일치
 CMD ["python", "app.py"]
 
+ENV PYTHONPATH=/app

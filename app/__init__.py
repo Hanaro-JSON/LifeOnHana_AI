@@ -5,7 +5,8 @@ from .services.vector_service import VectorService
 import os
 import pymysql  # flask_mysqldb 대신 pymysql 사용
 from .api import init_api  # 변경
-from setting import MYSQL_CONFIG
+from config.settings import MYSQL_CONFIG
+
 
 # 서비스 인스턴스 생성
 redis_service = RedisService()
