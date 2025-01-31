@@ -12,7 +12,7 @@ def home():
     return "Welcome to the LifeOnHana AI Service!"
 
 # 클로드 API 설정
-API_KEY = os.getenv("CLAUDE_API_KEY", "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")
+API_KEY = os.getenv("CLAUDE_API_KEY", "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")
 client = anthropic.Anthropic(api_key=API_KEY)
 
 # 데이터베이스 연결 설정
