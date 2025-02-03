@@ -81,7 +81,13 @@ def related_products():
             raise ValueError("No JSON data found in Claude API response")
 
         json_data = match.group(0)
-        top_products = json.loads(json_data)
+        
+        try:
+            top_products = json.loads(json_data)
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON Error: {e}")
+            print("🚩 Problematic JSON:", json_data)
+            raise
 
         # 9️⃣ 관련 상품 매칭
         selected_products = [
