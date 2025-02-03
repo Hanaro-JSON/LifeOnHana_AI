@@ -98,7 +98,6 @@ def related_products():
                 "category": product["category"],
                 "link": product["link"],
                 "description": product["description"]
-                "score": next(item.get("score") for item in top_products if item.get("id") == product["product_id"])
             }
             for product in products
             if any(item.get("id") == product["product_id"] for item in top_products)
