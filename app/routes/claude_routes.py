@@ -99,12 +99,10 @@ def related_products():
         print("❌ Error:", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
 
-
 @bp.route('/recommend_loan_products', methods=['POST'])
 def recommend_loan_products():
     try:
         data = request.json
-        print("✅ Received Data:", data, flush=True)
 
         reason = data.get('reason')
         amount = data.get('amount')
@@ -118,20 +116,47 @@ def recommend_loan_products():
         if not isinstance(products, list) or not products:
             return jsonify({"error": "'products' must be a non-empty list"}), 400
 
+        user_data = {
+            "deposit_amount": user_data.get("deposit_amount", 0),
+            "loan_amount": user_data.get("loan_amount", 0),
+            "real_estate_amount": user_data.get("real_estate_amount", 0),
+            "total_asset": user_data.get("total_asset", 0),
+        }
+
+        # Claude API 호출
+        prompt = f"""
+        The user is requesting loan products for the reason: "{reason}", with a requested amount of {amount}.
+
+        The user's financial summary is:
+        - Deposit Amount: {user_data['deposit_amount']}
+        - Loan Amount: {user_data['loan_amount']}
+        - Real Estate Amount: {user_data['real_estate_amount']}
+        - Total Asset: {user_data['total_asset']}
+
+        Available loan products:
+        {json.dumps(products, ensure_ascii=False)}
+
+        Please return the **top 5 most relevant products** in **valid JSON format** like below:
+        [
+            {{"id": 101, "score": 95}},
+            {{"id": 102, "score": 90}}
+        ]
+        Only return the JSON array, without any additional text or explanation.
+        """
+
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=2048,
-            messages=[{"role": "user", "content": f"Recommend top 5 loan products based on the user's reason: {reason}, amount: {amount}, and user data: {json.dumps(user_data)}. Products: {json.dumps(products, ensure_ascii=False)}."}]
+            messages=[{"role": "user", "content": prompt.strip()}]
         )
-
-        print("📦 Claude API Response:", response, flush=True)
 
         analysis_result = " ".join(
             item.text.strip() for item in response.content if hasattr(item, 'text')
         ) if isinstance(response.content, list) else response.content.strip()
 
-        print("✅ Final Analysis Result:", analysis_result, flush=True)
+        print("📦 Claude API Response:", analysis_result, flush=True)
 
+        # JSON 배열 추출
         match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
         if not match:
             raise ValueError("Invalid JSON format from Claude API")
@@ -139,20 +164,24 @@ def recommend_loan_products():
         json_data = match.group(0)
         top_products = json.loads(json_data)
 
+        # 결과 생성
         selected_products = [
             {
                 **product,
                 "score": next((item["score"] for item in top_products if item["id"] == product["id"]), 0)
-            }
-            for product in products if product["id"] in [item["id"] for item in top_products]
+            } for product in products if product["id"] in [item["id"] for item in top_products]
         ]
 
         selected_products.sort(key=lambda x: x["score"], reverse=True)
+
         return jsonify({"products": selected_products[:5]}), 200
 
+    except json.JSONDecodeError as jde:
+        return jsonify({"error": "Failed to decode JSON response", "details": str(jde)}), 500
+    except ValueError as ve:
+        return jsonify({"error": "Invalid response format", "details": str(ve)}), 500
     except Exception as e:
-        print("❌ Error:", str(e), flush=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Unexpected error occurred", "details": str(e)}), 500
 
 
 # @bp.route("/")  # 기본 경로 추가
