@@ -266,9 +266,10 @@ def recommend_effect():
         product = data.get("product", {})
         article_shorts = data.get("articleShorts", "")
 
-        # 리스트인지 확인 후 문자열로 변환
         if isinstance(article_shorts, list):
-            article_shorts = " ".join(str(item) for item in article_shorts if item)
+            article_shorts = " ".join(
+                str(item).strip() for item in article_shorts if isinstance(item, str) and item.strip()
+            )
         elif isinstance(article_shorts, str):
             article_shorts = article_shorts.strip()
         else:
@@ -316,8 +317,7 @@ def recommend_effect():
             - Article Content: "{article_shorts}"
             - Product Name: "{product.get('name', 'N/A')}"
             - Description: "{product.get('description', 'N/A')}"
-
-            User's Recent Activities:
+            - User's Recent Activities:
             {formatted_histories}
 
             Generate a concise and engaging personalized recommendation for the user, focusing directly on the user's context and why this product is a good fit.
