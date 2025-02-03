@@ -80,16 +80,17 @@ def related_products():
         json_data = match.group(0)
         top_products = json.loads(json_data)
 
-        # 상위 2개의 상품 데이터 생성
+        # 상품 ID로 매칭하여 관련 상품 반환
         selected_products = [
             {
                 "product_id": product["product_id"],
                 "name": product["name"],
                 "category": product["category"],
                 "link": product["link"],
-                "score": next((item["score"] for item in top_products if item["id"] == product["product_id"]), 0)
+                "description": product["description"]
             }
             for product in products
+            if any(item.get("id") == product["product_id"] for item in top_products)
         ]
 
         return jsonify({"products": selected_products[:2]}), 200
