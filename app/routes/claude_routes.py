@@ -266,6 +266,7 @@ def recommend_effect():
         product = data.get("product", {})
         article_shorts = data.get("articleShorts", "")
 
+        # 리스트인지 확인 후 문자열로 변환
         if isinstance(article_shorts, list):
             article_shorts = " ".join(
                 str(item).strip() for item in article_shorts if isinstance(item, str) and item.strip()
@@ -286,7 +287,6 @@ def recommend_effect():
             return jsonify({"error": "Invalid product category"}), 400
 
         if category in ["LOAN", "SAVINGS"]:
-            # 금융 상품
             prompt = f"""
             The user is considering a financial product. Below is the context:
 
@@ -305,7 +305,6 @@ def recommend_effect():
             Please generate a personalized recommendation for the user regarding this financial product.
             """
         else:
-            # 라이프 상품
             recent_histories = user_data.get("recent_histories", [])
             formatted_histories = "\n".join(
                 f"- {history.get('category', 'N/A')}: {history.get('description', 'N/A')} (Amount: {history.get('amount', 'N/A')})"
@@ -323,13 +322,23 @@ def recommend_effect():
             Generate a concise and engaging personalized recommendation for the user, focusing directly on the user's context and why this product is a good fit.
             """
 
+        if not isinstance(prompt, str):
+            prompt = str(prompt)
+
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt.strip()}]
         )
 
-        analysis_result = response.content.strip()
+        if isinstance(response.content, list):
+            analysis_result = " ".join(
+                str(item).strip() for item in response.content if isinstance(item, str)
+            )
+        elif isinstance(response.content, str):
+            analysis_result = response.content.strip()
+        else:
+            analysis_result = str(response.content).strip()
 
         return jsonify({
             "analysisResult": analysis_result,
