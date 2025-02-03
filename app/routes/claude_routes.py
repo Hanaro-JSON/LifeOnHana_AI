@@ -23,10 +23,10 @@ engine = create_engine(DATABASE_URL)
 @bp.route('/related_products', methods=['POST'])
 def related_products():
     try:
-        content = request.json.get('content')  # JSON 배열 가져오기
+        content = request.json.get('content')  
         print("✅ Received Content:", content, flush=True)
 
-        if not isinstance(content, list):  # content가 배열인지 확인
+        if not isinstance(content, list): 
             return jsonify({"error": "content must be a list"}), 400
 
         # `type`이 "TEXT"인 항목만 필터링하여 문자열로 결합
@@ -36,10 +36,9 @@ def related_products():
 
         print("📝 User Prompt:", user_prompt, flush=True)
 
-        if not user_prompt.strip():  # 필터링 결과가 비어있다면 에러 처리
+        if not user_prompt.strip(): 
             return jsonify({"error": "No valid TEXT content found in the input"}), 400
 
-        # 데이터베이스에서 모든 상품 조회
         query = text("""
             SELECT product_id, name, description, category, link
             FROM product
@@ -49,14 +48,12 @@ def related_products():
 
         print("📦 Retrieved Products:", products, flush=True)
 
-        # 상품 리스트를 JSON 문자열로 변환
         product_data = [
             {"id": product["product_id"], "name": product["name"], "description": product["description"]}
             for product in products
         ]
         product_json = json.dumps(product_data, ensure_ascii=False)
 
-        # 클로드 API 호출
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=2048,
@@ -65,14 +62,12 @@ def related_products():
 
         print("📦 Claude API Response:", response, flush=True)
 
-        # 응답 파싱
         analysis_result = " ".join(
             item.text.strip() for item in response.content if hasattr(item, 'text')
         ) if isinstance(response.content, list) else response.content.strip()
 
         print("✅ Final Analysis Result:", analysis_result, flush=True)
 
-        # JSON 배열 추출
         match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
         if not match:
             raise ValueError("No JSON data found in Claude API response")
@@ -123,7 +118,6 @@ def recommend_loan_products():
             "total_asset": user_data.get("total_asset", 0),
         }
 
-        # Claude API 호출
         prompt = f"""
         The user is requesting loan products for the reason: "{reason}", with a requested amount of {amount}.
 
@@ -156,7 +150,6 @@ def recommend_loan_products():
 
         print("📦 Claude API Response:", analysis_result, flush=True)
 
-        # JSON 배열 추출
         match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
         if not match:
             raise ValueError("Invalid JSON format from Claude API")
@@ -164,7 +157,6 @@ def recommend_loan_products():
         json_data = match.group(0)
         top_products = json.loads(json_data)
 
-        # 결과 생성
         selected_products = [
             {
                 **product,
@@ -477,7 +469,8 @@ def recommend_effect():
             - Savings Amount: {user_data.get('savings_amount', 0)}
             - Loan Amount: {user_data.get('loan_amount', 0)}
 
-            Please generate a personalized recommendation.
+            Provide ONLY the personalized recommendation in one concise paragraph. 
+            DO NOT include any background explanation or introduction like "Based on the user's data". 
             """
         else:
             recent_histories = user_data.get("recent_histories", [])
@@ -494,7 +487,8 @@ def recommend_effect():
             - User's Recent Activities:
             {formatted_histories}
 
-            Generate a concise and engaging personalized recommendation.
+            Provide ONLY the personalized recommendation in one concise paragraph. 
+            DO NOT include any background explanation or introduction like "Based on the user's activities". 
             """
 
         print("📝 Generated Prompt:", prompt.strip(), flush=True)
