@@ -62,8 +62,12 @@ def related_products():
                 Products:
                 {product_json}
 
-                Return the **top 2 most relevant products** in JSON format with IDs and relevance scores:
-                [{{"id": 101}}, {{"id": 102}}]
+                Return ONLY the **top 2 most relevant products** in strict JSON format with IDs:
+                [
+                    {{"id": 101}},
+                    {{"id": 102}}
+                ]
+                ⚠️ Do NOT provide any additional explanation or text. ONLY return the JSON array as shown above.
                 """
             }]
         )
