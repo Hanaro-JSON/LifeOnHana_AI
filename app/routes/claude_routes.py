@@ -63,7 +63,7 @@ def related_products():
                 {product_json}
 
                 Return the **top 2 most relevant products** in JSON format with IDs and relevance scores:
-                [{"id": 101}, {"id": 102}]
+                [{{"id": 101}}, {{"id": 102}}]
                 """
             }]
         )
@@ -90,7 +90,7 @@ def related_products():
             print(f"❌ JSON Error: {e}")
             print("🚩 Problematic JSON:", json_data)
             raise
-        
+
         if len(top_products) < 2:
             return jsonify({"products": []}), 200
 
