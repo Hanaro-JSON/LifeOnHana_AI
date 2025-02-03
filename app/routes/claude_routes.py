@@ -22,15 +22,19 @@ engine = create_engine(DATABASE_URL)
 
 @bp.route('/related_products', methods=['POST'])
 def related_products():
-    content = request.json.get('content')  # JSON 배열 가져오기
-    if not isinstance(content, list):  # content가 배열인지 확인
-        return jsonify({"error": "content must be a list"}), 400
-
     try:
+        content = request.json.get('content')  # JSON 배열 가져오기
+        print("✅ Received Content:", content, flush=True)
+
+        if not isinstance(content, list):  # content가 배열인지 확인
+            return jsonify({"error": "content must be a list"}), 400
+
         # `type`이 "TEXT"인 항목만 필터링하여 문자열로 결합
         user_prompt = " ".join(
             part['content'] for part in content if part.get('type') == 'text'
         )
+
+        print("📝 User Prompt:", user_prompt, flush=True)
 
         if not user_prompt.strip():  # 필터링 결과가 비어있다면 에러 처리
             return jsonify({"error": "No valid TEXT content found in the input"}), 400
@@ -42,6 +46,8 @@ def related_products():
         """)
         with engine.connect() as connection:
             products = connection.execute(query).mappings().fetchall()
+
+        print("📦 Retrieved Products:", products, flush=True)
 
         # 상품 리스트를 JSON 문자열로 변환
         product_data = [
@@ -57,78 +63,74 @@ def related_products():
             messages=[{"role": "user", "content": f"Analyze the relevance of the following products to the article: {user_prompt}. Products: {product_json}. Return top 2 relevant products in JSON format."}]
         )
 
-        analysis_result = response.content.strip()
+        print("📦 Claude API Response:", response, flush=True)
 
-        try:
-            # 정규 표현식을 사용해 JSON 배열 추출
-            match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
-            if match:
-                json_data = match.group(0)  # JSON 데이터 추출
-                top_products = json.loads(json_data)  # JSON 파싱
-            else:
-                raise ValueError("No JSON data found in Claude API response")
+        # 응답 파싱
+        analysis_result = " ".join(
+            item.text.strip() for item in response.content if hasattr(item, 'text')
+        ) if isinstance(response.content, list) else response.content.strip()
 
-        except (ValueError, json.JSONDecodeError):
-            return jsonify({
-                "error": "Claude API did not return valid JSON",
-                "raw_response": analysis_result
-            }), 500
+        print("✅ Final Analysis Result:", analysis_result, flush=True)
+
+        # JSON 배열 추출
+        match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON data found in Claude API response")
+
+        json_data = match.group(0)
+        top_products = json.loads(json_data)
 
         # 상위 2개의 상품 데이터 생성
-        selected_products = []
-        for product in products:
-            for top_product in top_products:
-                if product["product_id"] == top_product["id"]:
-                    selected_products.append({
-                        "product_id": product["product_id"],
-                        "name": product["name"],
-                        "category": product["category"],
-                        "link": product["link"],
-                        "score": top_product["score"]
-                    })
+        selected_products = [
+            {
+                "product_id": product["product_id"],
+                "name": product["name"],
+                "category": product["category"],
+                "link": product["link"],
+                "score": next((item["score"] for item in top_products if item["id"] == product["product_id"]), 0)
+            }
+            for product in products
+        ]
 
-        return jsonify({"products": selected_products}), 200
+        return jsonify({"products": selected_products[:2]}), 200
 
     except Exception as e:
+        print("❌ Error:", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
 
 
 @bp.route('/recommend_loan_products', methods=['POST'])
 def recommend_loan_products():
-    data = request.json
-
-    # 요청 데이터 검증
-    reason = data.get('reason')
-    amount = data.get('amount')
-    user_data = data.get('userData', {})
-    products = data.get('products', [])
-
-    if not reason or not isinstance(reason, str) or not reason.strip():
-        return jsonify({"error": "'reason' must be a non-empty string"}), 400
-    if not amount or not isinstance(amount, (int, float)):
-        return jsonify({"error": "'amount' must be a valid number"}), 400
-    if not isinstance(products, list) or not products:
-        return jsonify({"error": "'products' must be a non-empty list"}), 400
-
-    # userData 기본값 설정
-    user_data = {
-        "deposit_amount": user_data.get("deposit_amount", 0),
-        "loan_amount": user_data.get("loan_amount", 0),
-        "real_estate_amount": user_data.get("real_estate_amount", 0),
-        "total_asset": user_data.get("total_asset", 0),
-    }
-
-    # Anthropic API 호출
     try:
+        data = request.json
+        print("✅ Received Data:", data, flush=True)
+
+        reason = data.get('reason')
+        amount = data.get('amount')
+        user_data = data.get('userData', {})
+        products = data.get('products', [])
+
+        if not reason or not isinstance(reason, str) or not reason.strip():
+            return jsonify({"error": "'reason' must be a non-empty string"}), 400
+        if not amount or not isinstance(amount, (int, float)):
+            return jsonify({"error": "'amount' must be a valid number"}), 400
+        if not isinstance(products, list) or not products:
+            return jsonify({"error": "'products' must be a non-empty list"}), 400
+
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=2048,
             messages=[{"role": "user", "content": f"Recommend top 5 loan products based on the user's reason: {reason}, amount: {amount}, and user data: {json.dumps(user_data)}. Products: {json.dumps(products, ensure_ascii=False)}."}]
         )
 
-        analysis_result = response.content.strip()
+        print("📦 Claude API Response:", response, flush=True)
 
-        # JSON 배열 추출
+        analysis_result = " ".join(
+            item.text.strip() for item in response.content if hasattr(item, 'text')
+        ) if isinstance(response.content, list) else response.content.strip()
+
+        print("✅ Final Analysis Result:", analysis_result, flush=True)
+
         match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
         if not match:
             raise ValueError("Invalid JSON format from Claude API")
@@ -136,23 +138,20 @@ def recommend_loan_products():
         json_data = match.group(0)
         top_products = json.loads(json_data)
 
-        # 결과 생성
         selected_products = [
             {
                 **product,
                 "score": next((item["score"] for item in top_products if item["id"] == product["id"]), 0)
-            } for product in products if product["id"] in [item["id"] for item in top_products]
+            }
+            for product in products if product["id"] in [item["id"] for item in top_products]
         ]
 
         selected_products.sort(key=lambda x: x["score"], reverse=True)
         return jsonify({"products": selected_products[:5]}), 200
 
-    except json.JSONDecodeError as jde:
-        return jsonify({"error": "Failed to decode JSON response", "details": str(jde)}), 500
-    except ValueError as ve:
-        return jsonify({"error": "Invalid response format", "details": str(ve)}), 500
     except Exception as e:
-        return jsonify({"error": "Unexpected error occurred", "details": str(e)}), 500
+        print("❌ Error:", str(e), flush=True)
+        return jsonify({"error": str(e)}), 500
 
 
 # @bp.route("/")  # 기본 경로 추가
@@ -404,11 +403,12 @@ def recommend_loan_products():
 
 #     except Exception as e:
 #         return jsonify({"error": str(e)}), 500
+
 @bp.route('/effect', methods=['POST'])
 def recommend_effect():
     try:
         data = request.json
-        print("✅ Received Data:", data)  # 📌 입력 데이터 로깅
+        print("✅ Received Data:", data, flush=True)
 
         product = data.get("product", {})
         article_shorts = data.get("articleShorts", "")
@@ -438,8 +438,8 @@ def recommend_effect():
             - Article Content: "{article_shorts}"
             - Product Name: "{product.get('name', 'N/A')}"
             - Description: "{product.get('description', 'N/A')}"
-            - Interest Rate: Basic: {product.get('basic_interest_rate', 'N/A')}, Max: {product.get('max_interest_rate', 'N/A')}
-            - Amount Range: Min: {product.get('min_amount', 'N/A')}, Max: {product.get('max_amount', 'N/A')}
+            - Interest Rate: Basic: {product.get('basic_interest_rate', 'N/A')}, Max: {product.get('max_interest_rate', 'N/A')}"
+            - Amount Range: Min: {product.get('min_amount', 'N/A')}, Max: {product.get('max_amount', 'N/A')}"
 
             User's Financial Data:
             - Total Asset: {user_data.get('total_asset', 0)}
@@ -447,7 +447,7 @@ def recommend_effect():
             - Savings Amount: {user_data.get('savings_amount', 0)}
             - Loan Amount: {user_data.get('loan_amount', 0)}
 
-            Please generate a personalized recommendation for the user regarding this financial product  without explicitly mentioning phrases like "Based on the context provided" or "Here is a personalized recommendation"
+            Please generate a personalized recommendation.
             """
         else:
             recent_histories = user_data.get("recent_histories", [])
@@ -464,35 +464,30 @@ def recommend_effect():
             - User's Recent Activities:
             {formatted_histories}
 
-            Generate a concise and engaging personalized recommendation for the user, focusing directly on the user's context and why this product is a good fit without explicitly mentioning phrases like "Based on the context provided" or "Here is a personalized recommendation"
+            Generate a concise and engaging personalized recommendation.
             """
 
-        # 📌 프롬프트 로깅
-        print("📝 Generated Prompt:", prompt.strip())
-
-        if not isinstance(prompt, str):
-            prompt = str(prompt)
+        print("📝 Generated Prompt:", prompt.strip(), flush=True)
 
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=4096,
+            max_tokens=1024,
             messages=[{"role": "user", "content": prompt.strip()}]
         )
 
-        # 📌 API 응답 로깅
-        print("📦 Claude API Response:", response)
+        print("📦 Claude API Response:", response, flush=True)
 
+        # 📌 API 응답에서 `text` 필드 추출
         if isinstance(response.content, list):
             analysis_result = " ".join(
-                str(item).strip() for item in response.content if isinstance(item, str)
+                item.text.strip() for item in response.content if hasattr(item, 'text')
             )
         elif isinstance(response.content, str):
             analysis_result = response.content.strip()
         else:
             analysis_result = str(response.content).strip()
 
-        # 📌 최종 결과 로깅
-        print("✅ Final Analysis Result:", analysis_result)
+        print("✅ Final Analysis Result:", analysis_result, flush=True)
 
         return jsonify({
             "analysisResult": analysis_result,
@@ -500,6 +495,5 @@ def recommend_effect():
         }), 200
 
     except Exception as e:
-        # 📌 예외 발생 시 에러 메시지 로깅
-        print("❌ Error:", str(e))
+        print("❌ Error:", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
