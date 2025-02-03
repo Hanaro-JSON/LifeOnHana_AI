@@ -258,15 +258,15 @@ def recommend_loan_products():
 
 #     except Exception as e:
 #         return jsonify({"error": str(e)}), 500
-
 @bp.route('/effect', methods=['POST'])
 def recommend_effect():
     try:
         data = request.json
+        print("✅ Received Data:", data)  # 📌 입력 데이터 로깅
+
         product = data.get("product", {})
         article_shorts = data.get("articleShorts", "")
 
-        # ✅ 리스트인지 확인 후 문자열로 변환
         if isinstance(article_shorts, list):
             article_shorts = " ".join(
                 str(item).strip() for item in article_shorts if isinstance(item, str) and item.strip()
@@ -278,7 +278,6 @@ def recommend_effect():
 
         user_data = data.get("userData", {})
 
-        # 요청 데이터 검증
         if not product or not article_shorts:
             return jsonify({"error": "Product and articleShorts are required"}), 400
 
@@ -286,7 +285,6 @@ def recommend_effect():
         if category not in ["LOAN", "SAVINGS", "LIFE"]:
             return jsonify({"error": "Invalid product category"}), 400
 
-        # ✅ 프롬프트 생성
         if category in ["LOAN", "SAVINGS"]:
             prompt = f"""
             The user is considering a financial product. Below is the context:
@@ -303,7 +301,7 @@ def recommend_effect():
             - Savings Amount: {user_data.get('savings_amount', 0)}
             - Loan Amount: {user_data.get('loan_amount', 0)}
 
-            Please generate a personalized recommendation for the user regarding this financial product.
+            Please generate a personalized recommendation for the user regarding this financial product  without explicitly mentioning phrases like "Based on the context provided" or "Here is a personalized recommendation"
             """
         else:
             recent_histories = user_data.get("recent_histories", [])
@@ -320,20 +318,24 @@ def recommend_effect():
             - User's Recent Activities:
             {formatted_histories}
 
-            Generate a concise and engaging personalized recommendation for the user, focusing directly on the user's context and why this product is a good fit.
+            Generate a concise and engaging personalized recommendation for the user, focusing directly on the user's context and why this product is a good fit without explicitly mentioning phrases like "Based on the context provided" or "Here is a personalized recommendation"
             """
 
-        # ✅ prompt가 문자열인지 확인 후 처리
+        # 📌 프롬프트 로깅
+        print("📝 Generated Prompt:", prompt.strip())
+
         if not isinstance(prompt, str):
             prompt = str(prompt)
 
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=1024,
+            max_tokens=4096,
             messages=[{"role": "user", "content": prompt.strip()}]
         )
 
-        # ✅ response.content 처리 강화
+        # 📌 API 응답 로깅
+        print("📦 Claude API Response:", response)
+
         if isinstance(response.content, list):
             analysis_result = " ".join(
                 str(item).strip() for item in response.content if isinstance(item, str)
@@ -343,10 +345,15 @@ def recommend_effect():
         else:
             analysis_result = str(response.content).strip()
 
+        # 📌 최종 결과 로깅
+        print("✅ Final Analysis Result:", analysis_result)
+
         return jsonify({
             "analysisResult": analysis_result,
             "productLink": product.get("link", "N/A")
         }), 200
 
     except Exception as e:
+        # 📌 예외 발생 시 에러 메시지 로깅
+        print("❌ Error:", str(e))
         return jsonify({"error": str(e)}), 500
