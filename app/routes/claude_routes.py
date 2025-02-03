@@ -218,7 +218,7 @@ def recommend_effect():
             - Savings Amount: {user_data.get('savings_amount', 0)}
             - Loan Amount: {user_data.get('loan_amount', 0)}
             
-            Please generate a personalized recommendation for the user regarding this financial product.
+            Please generate a personalized recommendation for the user regarding this financial product without explicitly mentioning phrases like "Based on the context provided" or "Here is a personalized recommendation"
             {anthropic.AI_PROMPT}
             """
         else:
