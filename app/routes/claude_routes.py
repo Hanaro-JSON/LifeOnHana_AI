@@ -29,11 +29,9 @@ def related_products():
         if not isinstance(content, list): 
             return jsonify({"error": "content must be a list"}), 400
 
-        # `type`이 "TEXT"인 항목만 필터링하여 문자열로 결합
         user_prompt = " ".join(
             part['content'] for part in content if part.get('type') == 'text'
         )
-
         print("📝 User Prompt:", user_prompt, flush=True)
 
         if not user_prompt.strip(): 
@@ -62,18 +60,22 @@ def related_products():
 
         print("📦 Claude API Response:", response, flush=True)
 
-        analysis_result = " ".join(
-            item.text.strip() for item in response.content if hasattr(item, 'text')
-        ) if isinstance(response.content, list) else response.content.strip()
+        # ✅ Claude 응답이 JSON인지 검증 후 처리
+        try:
+            analysis_result = response.content if isinstance(response.content, str) else response.content[0].get('text', '')
+            print("✅ Analysis Result:", analysis_result, flush=True)
 
-        print("✅ Final Analysis Result:", analysis_result, flush=True)
+            # JSON 배열 추출 (정규식 개선)
+            match = re.search(r'(\[.*?\])', analysis_result, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON data found in Claude API response")
 
-        match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
-        if not match:
-            raise ValueError("No JSON data found in Claude API response")
+            json_data = match.group(1)
+            top_products = json.loads(json_data)
 
-        json_data = match.group(0)
-        top_products = json.loads(json_data)
+        except (json.JSONDecodeError, ValueError) as e:
+            print("❌ JSON Parsing Error:", str(e), flush=True)
+            return jsonify({"error": f"Invalid JSON from Claude: {str(e)}"}), 500
 
         # 상품 ID로 매칭하여 관련 상품 반환
         selected_products = [
@@ -85,7 +87,7 @@ def related_products():
                 "description": product["description"]
             }
             for product in products
-            if any(item.get("id") == product["product_id"] for item in top_products)
+            if any(str(item.get("id")) == str(product["product_id"]) for item in top_products)
         ]
 
         return jsonify({"products": selected_products[:2]}), 200
@@ -93,6 +95,7 @@ def related_products():
     except Exception as e:
         print("❌ Error:", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
+
 
 @bp.route('/recommend_loan_products', methods=['POST'])
 def recommend_loan_products():
