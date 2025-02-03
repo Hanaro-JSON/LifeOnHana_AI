@@ -19,11 +19,6 @@ client = anthropic.Anthropic(api_key=API_KEY)
 
 DATABASE_URL = f"mysql+pymysql://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
 engine = create_engine(DATABASE_URL)
-from flask import Blueprint, request, jsonify
-import json
-import re
-from sqlalchemy import text
-from app import engine, client  # 필요한 경우 모듈에 맞게 경로 수정
 
 bp = Blueprint('related_products', __name__)
 
