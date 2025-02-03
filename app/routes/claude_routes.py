@@ -17,14 +17,6 @@ def home():
 API_KEY = os.getenv("CLAUDE_API_KEY", "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")
 client = anthropic.Anthropic(api_key=API_KEY)
 
-# 데이터베이스 연결 설정
-# DB_ENDPOINT = "seochodb.cnisi2wyicv7.ap-northeast-2.rds.amazonaws.com"
-# DB_PORT = 3306
-# DB_USERNAME = "json"
-# DB_PASSWORD = "LifeOnHana1!"
-# DB_NAME = "lifeonhanaDB"
-
-# DATABASE_URL = f"mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_ENDPOINT}:{DB_PORT}/{DB_NAME}"
 DATABASE_URL = f"mysql+pymysql://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
 engine = create_engine(DATABASE_URL)
 
@@ -192,8 +184,6 @@ def recommend_loan_products():
         return jsonify({"error": "Unexpected error occurred", "details": str(e)}), 500
 
 
-<<<<<<< Updated upstream
-=======
 # @bp.route('/effect', methods=['POST'])
 # def recommend_effect():
 #     try:
@@ -269,20 +259,14 @@ def recommend_loan_products():
 #     except Exception as e:
 #         return jsonify({"error": str(e)}), 500
 
->>>>>>> Stashed changes
 @bp.route('/effect', methods=['POST'])
 def recommend_effect():
     try:
         data = request.json
         product = data.get("product", {})
-<<<<<<< Updated upstream
-        article_shorts = data.get("articleShorts", "").strip()
-        user_data = data.get("userData", {})
-        
-=======
         article_shorts = data.get("articleShorts", "")
 
-        # 리스트인지 확인 후 문자열로 변환
+        # ✅ 리스트인지 확인 후 문자열로 변환
         if isinstance(article_shorts, list):
             article_shorts = " ".join(
                 str(item).strip() for item in article_shorts if isinstance(item, str) and item.strip()
@@ -294,7 +278,6 @@ def recommend_effect():
 
         user_data = data.get("userData", {})
 
->>>>>>> Stashed changes
         # 요청 데이터 검증
         if not product or not article_shorts:
             return jsonify({"error": "Product and articleShorts are required"}), 400
@@ -303,95 +286,54 @@ def recommend_effect():
         if category not in ["LOAN", "SAVINGS", "LIFE"]:
             return jsonify({"error": "Invalid product category"}), 400
 
+        # ✅ 프롬프트 생성
         if category in ["LOAN", "SAVINGS"]:
-<<<<<<< Updated upstream
-            # 금융 상품
-            prompt = f"""
-            {anthropic.HUMAN_PROMPT}
-            The user is considering a financial product. Below is the context:
-            
-=======
             prompt = f"""
             The user is considering a financial product. Below is the context:
 
->>>>>>> Stashed changes
             - Article Content: "{article_shorts}"
             - Product Name: "{product.get('name', 'N/A')}"
             - Description: "{product.get('description', 'N/A')}"
             - Interest Rate: Basic: {product.get('basic_interest_rate', 'N/A')}, Max: {product.get('max_interest_rate', 'N/A')}
             - Amount Range: Min: {product.get('min_amount', 'N/A')}, Max: {product.get('max_amount', 'N/A')}
-<<<<<<< Updated upstream
-            
-=======
 
->>>>>>> Stashed changes
             User's Financial Data:
             - Total Asset: {user_data.get('total_asset', 0)}
             - Deposit Amount: {user_data.get('deposit_amount', 0)}
             - Savings Amount: {user_data.get('savings_amount', 0)}
             - Loan Amount: {user_data.get('loan_amount', 0)}
-<<<<<<< Updated upstream
-            
-            Please generate a personalized recommendation for the user regarding this financial product.
-            {anthropic.AI_PROMPT}
-            """
-        else:
-            # 라이프 상품
-=======
 
             Please generate a personalized recommendation for the user regarding this financial product.
             """
         else:
->>>>>>> Stashed changes
             recent_histories = user_data.get("recent_histories", [])
             formatted_histories = "\n".join(
                 f"- {history.get('category', 'N/A')}: {history.get('description', 'N/A')} (Amount: {history.get('amount', 'N/A')})"
                 for history in recent_histories
             )
             prompt = f"""
-<<<<<<< Updated upstream
-            {anthropic.HUMAN_PROMPT}
-=======
->>>>>>> Stashed changes
             The following is a lifestyle product recommendation context:
 
             - Article Content: "{article_shorts}"
             - Product Name: "{product.get('name', 'N/A')}"
             - Description: "{product.get('description', 'N/A')}"
-<<<<<<< Updated upstream
-
-            User's Recent Activities:
-            {formatted_histories}
-
-            Generate a concise and engaging personalized recommendation for the user, without explicitly mentioning phrases like "Based on the context provided" or "Here is a personalized recommendation". Focus directly on the user's context and why this product is a good fit.
-            {anthropic.AI_PROMPT}
-            """
-
-        response = client.completions.create(
-            model="claude-2.0",
-            max_tokens_to_sample=4096,
-            prompt=prompt.strip()
-        )
-
-        analysis_result = response.completion.strip()
-=======
             - User's Recent Activities:
             {formatted_histories}
 
             Generate a concise and engaging personalized recommendation for the user, focusing directly on the user's context and why this product is a good fit.
             """
-        
-        print("Claude API Raw Response:", response)
 
+        # ✅ prompt가 문자열인지 확인 후 처리
         if not isinstance(prompt, str):
             prompt = str(prompt)
 
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=4096,
+            max_tokens=1024,
             messages=[{"role": "user", "content": prompt.strip()}]
         )
 
+        # ✅ response.content 처리 강화
         if isinstance(response.content, list):
             analysis_result = " ".join(
                 str(item).strip() for item in response.content if isinstance(item, str)
@@ -400,7 +342,6 @@ def recommend_effect():
             analysis_result = response.content.strip()
         else:
             analysis_result = str(response.content).strip()
->>>>>>> Stashed changes
 
         return jsonify({
             "analysisResult": analysis_result,
@@ -408,8 +349,4 @@ def recommend_effect():
         }), 200
 
     except Exception as e:
-<<<<<<< Updated upstream
         return jsonify({"error": str(e)}), 500
-=======
-        return jsonify({"error": str(e)}), 500
->>>>>>> Stashed changes
