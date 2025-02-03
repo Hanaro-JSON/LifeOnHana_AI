@@ -264,7 +264,16 @@ def recommend_effect():
     try:
         data = request.json
         product = data.get("product", {})
-        article_shorts = data.get("articleShorts", "").strip()
+        article_shorts = data.get("articleShorts", "")
+
+        # 리스트인지 확인 후 문자열로 변환
+        if isinstance(article_shorts, list):
+            article_shorts = " ".join(str(item) for item in article_shorts if item)
+        elif isinstance(article_shorts, str):
+            article_shorts = article_shorts.strip()
+        else:
+            article_shorts = str(article_shorts).strip()
+
         user_data = data.get("userData", {})
 
         # 요청 데이터 검증
