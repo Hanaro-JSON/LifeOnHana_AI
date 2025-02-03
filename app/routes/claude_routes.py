@@ -22,22 +22,18 @@ engine = create_engine(DATABASE_URL)
 @bp.route('/related_products', methods=['POST'])
 def related_products():
     try:
-        # 1️⃣ JSON 데이터에서 content 가져오기
         content = request.json.get('content')
         print("✅ Received Content:", content, flush=True)
 
-        # 2️⃣ content가 문자열인지 확인
         if not isinstance(content, str):
             return jsonify({"error": "content must be a string"}), 400
 
-        # 3️⃣ 문자열 그대로 사용 (필요 시 추가 전처리 가능)
         user_prompt = content.strip()
         print("📝 User Prompt:", user_prompt, flush=True)
 
         if not user_prompt:
             return jsonify({"error": "No valid content provided"}), 400
 
-        # 4️⃣ DB에서 상품 정보 조회
         query = text("""
             SELECT product_id, name, description, category, link
             FROM product
@@ -47,26 +43,33 @@ def related_products():
 
         print("📦 Retrieved Products:", products, flush=True)
 
-        # 5️⃣ Claude API 요청을 위한 데이터 준비
         product_data = [
             {"id": product["product_id"], "name": product["name"], "description": product["description"]}
             for product in products
         ]
         product_json = json.dumps(product_data, ensure_ascii=False)
 
-        # 6️⃣ Claude API 호출
+            
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=2048,
+            max_tokens=512,
             messages=[{
                 "role": "user",
-                "content": f"Analyze the relevance of the following products to the article: {user_prompt}. Products: {product_json}. Return top 2 relevant products in JSON format."
+                "content": f"""
+                Analyze the relevance of the following products to the article:
+                "{user_prompt}"
+
+                Products:
+                {product_json}
+
+                Return the **top 2 most relevant products** in JSON format with IDs and relevance scores:
+                [{{"id": 101, "score": 95}}, {{"id": 102, "score": 90}}]
+                """
             }]
         )
 
         print("📦 Claude API Response:", response, flush=True)
 
-        # 7️⃣ Claude API 응답 처리
         analysis_result = (
             " ".join(item.text.strip() for item in response.content if hasattr(item, 'text'))
             if isinstance(response.content, list)
@@ -75,7 +78,6 @@ def related_products():
 
         print("✅ Final Analysis Result:", analysis_result, flush=True)
 
-        # 8️⃣ JSON 데이터 추출
         match = re.search(r'\[.*?\]', analysis_result, re.DOTALL)
         if not match:
             raise ValueError("No JSON data found in Claude API response")
@@ -89,7 +91,6 @@ def related_products():
             print("🚩 Problematic JSON:", json_data)
             raise
 
-        # 9️⃣ 관련 상품 매칭
         selected_products = [
             {
                 "product_id": product["product_id"],
@@ -97,12 +98,12 @@ def related_products():
                 "category": product["category"],
                 "link": product["link"],
                 "description": product["description"]
+                "score": next(item.get("score") for item in top_products if item.get("id") == product["product_id"])
             }
             for product in products
             if any(item.get("id") == product["product_id"] for item in top_products)
         ]
 
-        # 10️⃣ 최종 응답 반환
         return jsonify({"products": selected_products[:2]}), 200
 
     except Exception as e:
