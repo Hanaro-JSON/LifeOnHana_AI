@@ -6,7 +6,6 @@ import json
 import re
 from config.settings import MYSQL_CONFIG
 
-
 bp = Blueprint('claude', __name__)
 
 @bp.route("/")  # 기본 경로 추가
@@ -19,8 +18,6 @@ client = anthropic.Anthropic(api_key=API_KEY)
 
 DATABASE_URL = f"mysql+pymysql://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
 engine = create_engine(DATABASE_URL)
-
-bp = Blueprint('related_products', __name__)
 
 @bp.route('/related_products', methods=['POST'])
 def related_products():
