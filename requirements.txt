@@ -1,0 +1,17 @@
+flask==3.0.3
+redis==5.0.1
+transformers>=3.5.1,<5.0.0
+torch>=1.4.1
+numpy<1.25.0
+anthropic
+sqlalchemy
+requests>=2.31.0
+scikit-learn>=0.24.0
+sentencepiece>=0.1.99
+protobuf==3.20.0
+korpora>=0.2.0  
+konlpy>=0.6.0
+JPype1>=1.4.1 
+mecab-python3>=0.996.5
+PyMySQL==1.1.0 
+python-dotenv==1.0.0

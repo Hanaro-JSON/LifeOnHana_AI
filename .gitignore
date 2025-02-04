@@ -1,0 +1,33 @@
+# Python 관련
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+
+# 환경 변수 및 민감 정보
+.env
+
+# IDE 및 편집기 설정
+.vscode/
+.idea/
+*.swp
+
+# 로그 파일
+*.log
+
+# macOS 관련
+.DS_Store
+
+# WSGI 캐시
+wsgi.pyc
+__pycache__/wsgi.cpython-*.pyc
+
+# 모델 파일 및 대형 데이터
+pytorch_model.bin
+checkpoints/
+saved_models/
