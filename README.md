@@ -8,21 +8,21 @@
 
 
 ## 📜 목차
-- [ ⏰ BE 시간 관리](#-be-시간-관리)
+- [ ⏰ AI 시간 관리](#-ai-시간-관리)
 - [ 📚 기술 스택](#-기술-스택)
-- [ 🤗 BE 팀원](#-be-팀원)
+- [ 🤗 AI 팀원](#-ai-팀원)
 <br />
 
-## ⏰ BE 시간 관리
-- 2025.01.08 - 2025.01.14 | api 명세서, erd 작성, aws rds 구축, 데이터 크롤링, Anthropic api 연결 
-- 2025.01.15 - 2025.01.21 | api 개발, S3 및 CloudFront 연결, tts 데이터 생성
-- 2025.01.22 - 2025.01.28 | api 테스트 코드 작성, Spring 서버 배포 및 CI/CD 구축, Python 서버 배포
-- 2025.01.29 - 2025.02.04 | 코드 리팩토링, 모니터링 서버 구축
+## ⏰ AI 시간 관리
+- 2025.01.08 - 2025.01.14 | Anthropic api 연결, 추천 알고리즘 개발
+- 2025.01.15 - 2025.01.21 | api 개발
+- 2025.01.22 - 2025.01.28 | FLASK 서버 배포 및 CI/CD 구축
+- 2025.01.29 - 2025.02.04 | 코드 리팩토링
 
 <br />
 
 ## 📚 기술 스택
-### Back-end
+### AI
 <img src="https://img.shields.io/badge/python-3776AB?style=for-the-badge&logo=python&logoColor=white"> <img src="https://img.shields.io/badge/flask-000000?style=for-the-badge&logo=flask&logoColor=white"> <img src="https://img.shields.io/badge/mysql-4479A1?style=for-the-badge&logo=mysql&logoColor=white"> <img src="https://img.shields.io/badge/redis-FF4438?style=for-the-badge&logo=redis&logoColor=white">
 
 ### Infra
