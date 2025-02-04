@@ -6,12 +6,12 @@ import json
 
 logger = logging.getLogger(__name__)
 
+API_KEY = os.getenv("CLAUDE_API_KEY")
+
 class ArticleProcessor:
     def __init__(self, bert_model):
         self.bert_model = bert_model
-        self.client = anthropic.Anthropic(
-            api_key="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"
-        )
+        self.client = anthropic.Anthropic(api_key=API_KEY)
         # logger.info("Claude API 클라이언트 초기화 완료")
         # 영구적인 단어 설명 캐시
         self.word_descriptions_cache = {}
