@@ -3,6 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        MYSQL_HOST: ${MYSQL_HOST}
+        MYSQL_USER: ${MYSQL_USER}
+        MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+        MYSQL_DATABASE: ${MYSQL_DATABASE}
+        CLAUDE_API_KEY: ${CLAUDE_API_KEY}
+        CACHE_TTL: ${CACHE_TTL}
+        CACHE_MAX_SIZE: ${CACHE_MAX_SIZE}
     ports:
       - "5000:5000"
     volumes:

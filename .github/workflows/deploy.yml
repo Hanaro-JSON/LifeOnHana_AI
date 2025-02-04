@@ -53,7 +53,14 @@ jobs:
             echo "=== 모델 파일 다운로드 ==="
             bash download_model.sh
 
-            echo "=== 캐시를 활용한 빌드 최적화 ==="
+            echo "=== 빌드 시 환경 변수 적용 ==="
+            MYSQL_HOST=${{ secrets.MYSQL_HOST }} \
+            MYSQL_USER=${{ secrets.MYSQL_USER }} \
+            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }} \
+            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }} \
+            CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }} \
+            CACHE_TTL=${{ secrets.CACHE_TTL }} \
+            CACHE_MAX_SIZE=${{ secrets.CACHE_MAX_SIZE }} \
             docker-compose build --no-cache | tee docker-build.log
             
             echo "=== 컨테이너 실행 ==="
