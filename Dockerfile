@@ -27,25 +27,25 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # konlpy 및 Korpora 설치
-RUN curl -s https://raw.githubusercontent.com/konlpy/konlpy/master/scripts/mecab.sh | bash -s
-RUN pip install git+https://github.com/ko-nlp/Korpora.git
+# RUN curl -s https://raw.githubusercontent.com/konlpy/konlpy/master/scripts/mecab.sh | bash -s
+# RUN pip install git+https://github.com/ko-nlp/Korpora.git
 
 # 데이터 다운로드 스크립트 생성
-COPY download_korpora.py .
-RUN python download_korpora.py
+# COPY download_korpora.py .
+# RUN python download_korpora.py
 
 # MeCab 설치 확인 스크립트
-RUN echo '#!/bin/bash\n\
-echo "=== MeCab 설치 확인 ==="\n\
-which mecab\n\
-echo "=== MeCab 사전 경로 ==="\n\
-mecab-config --dicdir\n\
-echo "=== MeCab 사전 파일 검색 ==="\n\
-find / -name "dicrc" 2>/dev/null\n\
-' > /check-mecab.sh && chmod +x /check-mecab.sh
+# RUN echo '#!/bin/bash\n\
+# echo "=== MeCab 설치 확인 ==="\n\
+# which mecab\n\
+# echo "=== MeCab 사전 경로 ==="\n\
+# mecab-config --dicdir\n\
+# echo "=== MeCab 사전 파일 검색 ==="\n\
+# find / -name "dicrc" 2>/dev/null\n\
+# ' > /check-mecab.sh && chmod +x /check-mecab.sh
 
 # 스크립트 실행
-RUN /check-mecab.sh
+# RUN /check-mecab.sh
 
 # 애플리케이션 코드 복사
 COPY . .
