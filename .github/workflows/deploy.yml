@@ -3,7 +3,7 @@ name: CI/CD Pipeline
 on:
   push:
     branches:
-      - develop
+      - main
 
 jobs:
   build-and-deploy:
@@ -33,7 +33,7 @@ jobs:
             cd ~/LifeOnHana_AI
 
             echo "=== 최신 코드 가져오기 ==="
-            git fetch https://yena45:${{ secrets.GH_TOKEN }}@github.com/Hanaro-JSON/LifeOnHana_AI.git develop
+            git fetch https://yena45:${{ secrets.GH_TOKEN }}@github.com/Hanaro-JSON/LifeOnHana_AI.git main
             git reset --hard FETCH_HEAD
 
             echo "=== 기존 컨테이너 중지 ==="
