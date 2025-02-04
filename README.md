@@ -1,4 +1,4 @@
-## 🌌 team JSON - 백엔드
+## 🌌 team JSON - AI
 
 ### 디지털 하나로 4기 - 비대면 금융 서비스 개발 프로젝트
 
@@ -30,18 +30,14 @@
 
 <br />
 
-## 🤗 BE 팀원
+## 🤗 AI 팀원
 <table>
   <tr>
     <td><img src="https://github.com/teadmu.png" width="100px" /></td>
-    <td><img src="https://github.com/mingwan21.png" width="100px" /></td>
-    <td><img src="https://github.com/yena45.png" width="100px" /></td>
-    <td><img src="https://github.com/hyemch.png" width="100px" /></td>    
+    <td><img src="https://github.com/yena45.png" width="100px" /></td> 
   </tr>
   <tr>
-    <td align="center"><a href="https://github.com/teadmu">강능요 🦥</a></td>
-    <td align="center"><a href="https://github.com/mingwan21">강민관 🐢</a></td>	
+    <td align="center"><a href="https://github.com/teadmu">강능요 🦥</a></td>	
     <td align="center"><a href="https://github.com/yena45">김예나 🦧</a></td>
-    <td align="center"><a href="https://github.com/hyemch">천혜민 🧚🏻‍♀️</a></td>
   </tr>
 </table>
