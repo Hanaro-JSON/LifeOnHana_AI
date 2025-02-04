@@ -21,23 +21,39 @@ jobs:
           key: ${{ secrets.EC2_KEY }}
           script: |
             export DOCKER_BUILDKIT=1
-            echo "Checking and cleaning up disk space..."
+            echo "=== 디스크 공간 정리 ==="
             df -h
             docker image prune -a -f
             docker container prune -f
             docker volume prune -f
             docker builder prune -a -f
 
-            echo "SSH connection successful!"
+            echo "=== SSH 연결 성공 ==="
             set -e
             cd ~/LifeOnHana_AI
-            echo "Pulling latest code..."
+
+            echo "=== 최신 코드 가져오기 ==="
             git fetch https://yena45:${{ secrets.GH_TOKEN }}@github.com/Hanaro-JSON/LifeOnHana_AI.git develop
             git reset --hard FETCH_HEAD
-            echo "Stopping existing containers..."
+
+            echo "=== 기존 컨테이너 중지 ==="
             docker-compose down --remove-orphans
-            echo "Building Docker images with BuildKit..."
+
+            echo "=== 환경 변수 설정 ==="
+            export MYSQL_HOST=${{ secrets.MYSQL_HOST }}
+            export MYSQL_USER=${{ secrets.MYSQL_USER }}
+            export MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            export MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
+            export CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}
+            export REDIS_HOST=${{ secrets.REDIS_HOST }}
+            export REDIS_PORT=${{ secrets.REDIS_PORT }}
+            export CACHE_TTL=${{ secrets.CACHE_TTL }}
+            export CACHE_MAX_SIZE=${{ secrets.CACHE_MAX_SIZE }}
+
+            echo "=== 캐시를 활용한 빌드 최적화 ==="
             docker-compose build --no-cache | tee docker-build.log
-            echo "Starting new containers..."
+            
+            echo "=== 컨테이너 실행 ==="
             docker-compose up -d
-            echo "Deployment completed successfully."
+            
+            echo "=== 배포 완료 ==="

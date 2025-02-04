@@ -10,10 +10,17 @@ services:
       - ./Bert:/app/Bert
     environment:
       - FLASK_APP=app.py
-      - FLASK_ENV=development
+      - FLASK_ENV=production
       - FLASK_DEBUG=1
       - REDIS_HOST=redis
       - MODEL_PATH=/app/Bert
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - CACHE_TTL=${CACHE_TTL}
+      - CACHE_MAX_SIZE=${CACHE_MAX_SIZE}
     command: flask run --host=0.0.0.0 --port=5000 --debug
     depends_on:
       - redis

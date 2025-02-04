@@ -20,7 +20,7 @@ db = pymysql.connect(
     password=MYSQL_CONFIG['password'],
     database=MYSQL_CONFIG['database'],
     charset=MYSQL_CONFIG.get('charset', 'utf8mb4'),
-    cursorclass=MYSQL_CONFIG.get('cursorclass', pymysql.cursors.DictCursor)
+    cursorclass=MYSQL_CONFIG['cursorclass']
 )
 
 def create_app():

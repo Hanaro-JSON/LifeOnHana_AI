@@ -1,7 +1,29 @@
 import os
+import pymysql.cursors
 
-# 설정 파일 생성
-VECTOR_DIM = 768
+MYSQL_CONFIG = {
+    'host': os.getenv('MYSQL_HOST', 'localhost'),
+    'user': os.getenv('MYSQL_USER', 'root'),
+    'password': os.getenv('MYSQL_PASSWORD', ''),
+    'database': os.getenv('MYSQL_DATABASE', 'default_db'),
+    'charset': 'utf8mb4',
+    'cursorclass': pymysql.cursors.DictCursor
+}
+
+REDIS_CONFIG = {
+    'host': os.getenv('REDIS_HOST', 'localhost'),
+    'port': int(os.getenv('REDIS_PORT', 6379)),
+    'db': 0
+}
+
+CACHE_CONFIG = {
+    'ttl': int(os.getenv('CACHE_TTL', 3600)), 
+    'max_size': int(os.getenv('CACHE_MAX_SIZE', 1000))
+}
+
+API_KEY = os.getenv("CLAUDE_API_KEY")
+
+VECTOR_DIM = int(os.getenv('VECTOR_DIM', 768))
 
 AB_TEST_GROUPS = {
     'A': {'content': 0.4, 'cf': 0.3, 'time': 0.2, 'diversity': 0.1},
@@ -13,24 +35,3 @@ CONTEXT_WEIGHTS = {
     'afternoon': {'loan': 1.2, 'credit': 1.1},
     'evening': {'savings': 1.2, 'insurance': 1.1}
 }
-
-REDIS_CONFIG = {
-    'host': 'localhost',
-    'port': 6379,
-    'db': 0
-}
-
-CACHE_CONFIG = {
-    'ttl': 3600,  # 1시간
-    'max_size': 1000
-}
-
-# MySQL(RDS) 설정
-MYSQL_CONFIG = {
-    'host': 'seochodb.cnisi2wyicv7.ap-northeast-2.rds.amazonaws.com',
-    'user': 'json',
-    'password': 'LifeOnHana1!',
-    'database': 'lifeonhanaDB',
-    'charset': 'utf8mb4',
-    'cursorclass': 'DictCursor'
-} 
