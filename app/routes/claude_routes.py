@@ -15,6 +15,12 @@ def home():
 
 # 클로드 API 설정
 API_KEY = os.getenv("CLAUDE_API_KEY")
+
+if not API_KEY:
+    print("❌ CLAUDE_API_KEY가 설정되지 않았습니다.", flush=True)
+else:
+    print(f"✅ API 키 로드 완료: {API_KEY[:8]}***", flush=True)
+    
 client = anthropic.Anthropic(api_key=API_KEY)
 
 DATABASE_URL = f"mysql+pymysql://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
